@@ -1,0 +1,44 @@
+# Compiled executables
+*.exe
+*.out
+*.app
+
+# Object files and build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+
+# Debug files
+*.pdb
+*.idb
+*.ilk
+
+# IDE specific files
+.vscode/
+.idea/
+*.suo
+*.user
+*.sln
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Build directories
+bin/
+obj/
+build/
+dist/
+__pycache__/
+
+# Log files
+*.log
+*.tmp
+
+# Environment files
+.env
+*.env
