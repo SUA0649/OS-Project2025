@@ -15,6 +15,7 @@
 #define THREAD_POOL_SIZE 30
 #define MAX_QUEUE 30
 
+//For socketing
 int server_fd;
 struct sockaddr_in server_addr;
 
@@ -28,6 +29,7 @@ typedef struct Client
 Client active_clients[MAX_CLIENTS];
 int num_clients = 0;
 
+//For threading
 pthread_t worker_thread[THREAD_POOL_SIZE];
 pthread_mutex_t clients_mutex;
 pthread_cond_t new_task_cond;
