@@ -42,3 +42,5 @@ __pycache__/
 # Environment files
 .env
 *.env
+
+temp.c 

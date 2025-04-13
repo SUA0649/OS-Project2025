@@ -1,8 +1,11 @@
+all: server client
+	make clean
+
 server: server.c ui.o chat.o
-	gcc server.c ui.o chat.o -o server -lncurses
+	gcc server.c ui.o chat.o -o server.exe -lncurses
 
 client: client.o ui.o chat.o
-	gcc client.o ui.o chat.o -o client -lncurses
+	gcc client.o ui.o chat.o -o client.exe -lncurses
 
 client.o: client.c ui.h
 	gcc -c client.c -o client.o -lncurses
@@ -13,5 +16,7 @@ chat.o: chat.c chat.h ui.h
 ui.o: ui.c ui.h
 	gcc -c ui.c -o ui.o -lncurses
 
+cleanall:
+	rm -f client.exe server.exe
 clean:
-	rm -f server client *.o
+	rm -f *.o
