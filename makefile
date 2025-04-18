@@ -7,4 +7,4 @@ client: client.c
 	gcc client.c -o client.exe -lncurses -lpthread
 
 clean:
-	rm -f server client
+	rm -f server.exe client.exe

@@ -7,29 +7,44 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <stdbool.h>
-
+#include <sys/queue.h>
 
 #define MAX_CLIENTS 50
 #define MAX_NAME_LEN 32
 #define MAX_MSG_LEN 512
 #define PORT 8080
 #define MAX_WELCOME_MSG (MAX_MSG_LEN + MAX_NAME_LEN + 20)
+#define QUEUE_SIZE 10
 
 typedef struct {
     char name[MAX_NAME_LEN];
     char ip[INET_ADDRSTRLEN];
     int port;
     int socket;
-	int client_index;
+    int client_index;
 } ClientInfo;
+
+// Queue for incoming connections
+typedef struct connection_queue {
+    int client_sock;
+    struct sockaddr_in client_addr;
+    STAILQ_ENTRY(connection_queue) entries;
+} connection_queue_t;
+
+STAILQ_HEAD(queue_head, connection_queue);
+
+struct queue_head connection_queue;
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
 
 ClientInfo clients[MAX_CLIENTS];
 int client_count = 0;
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+bool server_running = true;
 
 void broadcast_user_list();
 void remove_client(int index);
-void *handle_client(void *arg);
+void *thread_worker(void *arg);
 
 void add_client(const char *name, const char *ip, int port, int socket) {
     pthread_mutex_lock(&clients_mutex);
@@ -38,8 +53,9 @@ void add_client(const char *name, const char *ip, int port, int socket) {
         pthread_mutex_unlock(&clients_mutex);
         return;
     }
-	memset(&clients[client_count].name, 0, sizeof(clients[client_count].name));
-	memset(&clients[client_count].ip, 0, sizeof(clients[client_count].ip));
+    
+    memset(&clients[client_count].name, 0, sizeof(clients[client_count].name));
+    memset(&clients[client_count].ip, 0, sizeof(clients[client_count].ip));
 
     strncpy(clients[client_count].name, name, MAX_NAME_LEN - 1);
     strncpy(clients[client_count].ip, ip, INET_ADDRSTRLEN - 1);
@@ -53,8 +69,15 @@ void add_client(const char *name, const char *ip, int port, int socket) {
 
 void remove_client(int index) {
     pthread_mutex_lock(&clients_mutex);
+    
+    if (index < 0 || index >= client_count) {
+        pthread_mutex_unlock(&clients_mutex);
+        return;
+    }
+
     close(clients[index].socket);
     
+    // Shift remaining clients
     for (int i = index; i < client_count - 1; i++) {
         clients[i] = clients[i + 1];
     }
@@ -107,49 +130,44 @@ void broadcast_user_list() {
     for (int i = 0; i < client_count; i++) {
         send(clients[i].socket, user_list, strlen(user_list) + 1, 0);
     }
+    fflush(stdout);
+    printf("%s   ",user_list);
+    fflush(stdout);
     
     free(user_list);
     pthread_mutex_unlock(&clients_mutex);
 }
 
-void *handle_client(void *arg) { int client_sock = *((int *)arg);
-    struct sockaddr_in client_addr;
-    socklen_t addr_len = sizeof(client_addr);
+void handle_client(int client_sock, struct sockaddr_in client_addr) { 
     char buffer[MAX_MSG_LEN] = {0};
     char client_ip[INET_ADDRSTRLEN];
 
-    // Get client IP and port
-    getpeername(client_sock, (struct sockaddr *)&client_addr, &addr_len);
     inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-
-	//client port
-	int client_port = ntohs(client_addr.sin_port);
+    int client_port = ntohs(client_addr.sin_port);
 
     // Get username
-    memset(buffer, 0, sizeof(buffer));
-	
-	int bytes = recv(client_sock, buffer, MAX_MSG_LEN - 1, 0);
-    if (bytes < 0) {
+    int bytes = recv(client_sock, buffer, MAX_MSG_LEN - 1, 0);
+    if (bytes <= 0) {
         close(client_sock);
-        return NULL;
+        return;
     }
 
-	// Check if username exists
+
+    // Check if username exists
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < client_count; i++) {
         if (strcmp(clients[i].name, buffer) == 0) {
             send(client_sock, "ERROR: Username taken", 21, 0);
             close(client_sock);
             pthread_mutex_unlock(&clients_mutex);
-            return NULL;
+            return;
         }
     }
     pthread_mutex_unlock(&clients_mutex);
 
-
     // Add client
     add_client(buffer, client_ip, client_port, client_sock);
-	
+    
     // Welcome message
     char welcome_msg[MAX_WELCOME_MSG];
     snprintf(welcome_msg, sizeof(welcome_msg), "SERVER: %s has joined the chat", buffer);
@@ -162,101 +180,101 @@ void *handle_client(void *arg) { int client_sock = *((int *)arg);
     }
     pthread_mutex_unlock(&clients_mutex);
 
-    bool p2p = false;
-    int p2p_target = -1;
-
     // Chat loop
     while (1) {
         memset(buffer, 0, sizeof(buffer));
-    
-		bytes = recv(client_sock, buffer, MAX_MSG_LEN - 1, 0);
+        bytes = recv(client_sock, buffer, MAX_MSG_LEN - 1, 0);
+        
         if (bytes <= 0) break;
 
-        if (strcmp(buffer, "/quit") == 0) break;
+        if (strcmp(buffer, "/quit") == 0){
+            break;
+        }
         
-        if (!p2p) {
-            if (strncmp(buffer, "/connect ", 9) == 0) {
-                char *target_name = buffer + 9;
-                pthread_mutex_lock(&clients_mutex);
-                for (int i = 0; i < client_count; i++) {
-                    if (strcmp(clients[i].name, target_name) == 0) {
-                        // Send connection info to requesting client
-                        char conn_info[MAX_MSG_LEN];
-                        snprintf(conn_info, sizeof(conn_info), "P2P:%s:%d", 
-                                clients[i].ip, clients[i].port);
-                        send(client_sock, conn_info, strlen(conn_info), 0);
-                        
-                        // Notify target client
-                        char notify_msg[MAX_MSG_LEN];
-                        snprintf(notify_msg, sizeof(notify_msg), 
-                                "P2P_REQUEST:%s:%d", client_ip, client_port);
-                        send(clients[i].socket, notify_msg, strlen(notify_msg), 0);
-                        break;
-                    }
+        // Broadcast message with correct sender info
+        pthread_mutex_lock(&clients_mutex);
+        
+        int sender_index = -1;
+        for (int i = 0; i < client_count; i++) {
+            if (clients[i].socket == client_sock) {
+                sender_index = i;
+                break;
+            }
+        }
+        
+        if (sender_index != -1) {
+            char formatted_msg[MAX_MSG_LEN + MAX_NAME_LEN + 3];
+            char sender_msg[MAX_MSG_LEN + 10];
+            
+            snprintf(formatted_msg, sizeof(formatted_msg), "%s: %s", 
+            clients[sender_index].name, buffer);
+            snprintf(sender_msg, sizeof(sender_msg), "You: %s", buffer);
+            
+            for (int i = 0; i < client_count; i++) {
+                if (i == sender_index) {
+                    send(clients[i].socket, sender_msg, strlen(sender_msg), 0);
+                } else {
+                    send(clients[i].socket, formatted_msg, strlen(formatted_msg), 0);
                 }
-                pthread_mutex_unlock(&clients_mutex);
-            }
-			else {
-				// Broadcast message with correct sender info
-				pthread_mutex_lock(&clients_mutex);
-				
-				int sender_index = -1;
-				for (int i = 0; i < client_count; i++) {
-					if (clients[i].socket == client_sock) {
-						sender_index = i;
-						break;
-					}
-				}
-				
-				if (sender_index != -1) {
-					char formatted_msg[MAX_MSG_LEN + MAX_NAME_LEN + 3];
-					char sender_msg[MAX_MSG_LEN + 10];
-					
-					snprintf(formatted_msg, sizeof(formatted_msg), "%s: %s", 
-							clients[sender_index].name, buffer);
-					snprintf(sender_msg, sizeof(sender_msg), "You: %s", buffer);
-					
-					for (int i = 0; i < client_count; i++) {
-						if (i == sender_index) {
-							send(clients[i].socket, sender_msg, strlen(sender_msg), 0);
-						} else {
-							send(clients[i].socket, formatted_msg, strlen(formatted_msg), 0);
-						}
-					}
-				}
-				
-				pthread_mutex_unlock(&clients_mutex);
-			}
-        }
-        else {
-            // In P2P mode, just forward the message
-            if (p2p_target >= 0 && p2p_target < client_count) {
-                send(clients[p2p_target].socket, buffer, strlen(buffer), 0);
             }
         }
-    }
-
-    // Client disconnected
-    char leave_msg[MAX_WELCOME_MSG];
-    snprintf(leave_msg, sizeof(leave_msg), "SERVER: %s has left the chat", buffer);
-    
-    pthread_mutex_lock(&clients_mutex);
-    for (int i = 0; i < client_count; i++) {
-        if (clients[i].socket != client_sock) {
-            send(clients[i].socket, leave_msg, strlen(leave_msg), 0);
-        }
+        
+        pthread_mutex_unlock(&clients_mutex);
     }
     
-    // Find and remove client
+    int found_index = -1;
     for (int i = 0; i < client_count; i++) {
         if (clients[i].socket == client_sock) {
-            remove_client(i);
+            found_index = i;
             break;
         }
     }
-    pthread_mutex_unlock(&clients_mutex);
+    
+    pthread_mutex_lock(&clients_mutex);
+    if (found_index != -1) {
+        char leave_msg[MAX_WELCOME_MSG];
+        snprintf(leave_msg, sizeof(leave_msg), "SERVER: %s has left the chat", 
+        clients[found_index].name);
+        
+        // Send leave notification
+        for (int i = 0; i < client_count; i++) {
+            if (i != found_index) {
+                send(clients[i].socket, leave_msg, strlen(leave_msg), 0);
+            }
+        }
+        pthread_mutex_unlock(&clients_mutex);
 
+        remove_client(found_index); 
+    }
+    send(clients[found_index].socket, "SERVER: You have been disconnected", 34, 0);
     close(client_sock);
+}
+
+void *thread_worker(void *arg) {
+    while(server_running) {
+        connection_queue_t *item = NULL;
+        
+        pthread_mutex_lock(&queue_mutex);
+        while (STAILQ_EMPTY(&connection_queue) && server_running) {
+            pthread_cond_wait(&queue_cond, &queue_mutex);
+        }
+        
+        if (!server_running) {
+            pthread_mutex_unlock(&queue_mutex);
+            break;
+        }
+        
+        item = STAILQ_FIRST(&connection_queue);
+        if (item != NULL) {
+            STAILQ_REMOVE_HEAD(&connection_queue, entries);
+        }
+        pthread_mutex_unlock(&queue_mutex);
+        
+        if (item != NULL) {
+            handle_client(item->client_sock, item->client_addr);
+            free(item);
+        }
+    }
     return NULL;
 }
 
@@ -264,6 +282,10 @@ int main() {
     int server_fd;
     struct sockaddr_in address;
     int opt = 1;
+    pthread_t worker_threads[MAX_CLIENTS];
+
+    // Initialize connection queue
+    STAILQ_INIT(&connection_queue);
 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("socket failed");
@@ -284,30 +306,60 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_fd, 3) < 0) {
+    if (listen(server_fd, QUEUE_SIZE) < 0) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
 
     printf("Server listening on port %d\n", PORT);
 
-    while (1) {
-        int client_sock;
+    // Create worker threads
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        pthread_create(&worker_threads[i], NULL, thread_worker, NULL);
+    }
+
+    // Main accept loop
+    while (server_running) {
         struct sockaddr_in client_addr;
         socklen_t addr_len = sizeof(client_addr);
-
-        if ((client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &addr_len)) < 0) {
+        int client_sock = accept(server_fd, (struct sockaddr *)&client_addr, &addr_len);
+        
+        if (client_sock < 0) {
             perror("accept");
             continue;
         }
 
-        pthread_t thread_id;
-        if (pthread_create(&thread_id, NULL, handle_client, &client_sock) != 0) {
-            perror("pthread_create");
+        // Add to connection queue
+        connection_queue_t *item = malloc(sizeof(connection_queue_t));
+        if (item == NULL) {
             close(client_sock);
+            continue;
         }
-        pthread_detach(thread_id);
+        
+        item->client_sock = client_sock;
+        memcpy(&item->client_addr, &client_addr, sizeof(client_addr));
+        
+        pthread_mutex_lock(&queue_mutex);
+        STAILQ_INSERT_TAIL(&connection_queue, item, entries);
+        pthread_cond_signal(&queue_cond);
+        pthread_mutex_unlock(&queue_mutex);
     }
 
+    // Cleanup
+    server_running = false;
+    pthread_cond_broadcast(&queue_cond);
+    
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        pthread_join(worker_threads[i], NULL);
+    }
+    
+    // Close all client sockets
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        close(clients[i].socket);
+    }
+    pthread_mutex_unlock(&clients_mutex);
+    
+    close(server_fd);
     return 0;
 }

@@ -116,6 +116,7 @@ void add_message(const char *msg) {
 }
 
 void get_username() {
+    initscr();
     WINDOW *uname_win = newwin(5, 40, LINES/2-3, COLS/2-20);
     box(uname_win, 0, 0);
     mvwprintw(uname_win, 1, 1, "Enter your username: ");
@@ -190,13 +191,19 @@ void* receive_messages(void *arg) {
         memset(buffer, 0, sizeof(buffer));
 
 		int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
+        
         if(valread <= 0) {
             add_message("Disconnected from server");
+            current_socket = -1;
+            peer_count = 0;
+            update_user_list();
+            pthread_exit(NULL);
             break;
         }
+
 		if (strncmp(buffer, "USERS:", 6) == 0) {
 			// Debug: print the raw user list
-		
+            printf("\t %s    ",buffer);
 			// Clear existing peers
 			peer_count = 0;
 		
@@ -204,7 +211,8 @@ void* receive_messages(void *arg) {
 			char list_copy[MAX_MSG];
 			strncpy(list_copy, buffer + 6, MAX_MSG - 1);
 			list_copy[MAX_MSG - 1] = '\0';
-		
+            printf("%s  ",buffer);
+
 			// Tokenize and parse each user entry: "name:ip:port"
 			char *token = strtok(list_copy, ",");
 			while (token && peer_count < MAX_USERS) {
@@ -301,7 +309,18 @@ void chat_loop() {
         if(ch == '`') {
             if(current_conn_type == CONN_SERVER) {
                 send_to_current("/quit");
+                break;
             }
+            
+        // Close all sockets
+        if(p2p_socket != -1) {
+            close(p2p_socket);
+            p2p_socket = -1;
+        }
+        if(current_socket != -1) {
+            close(current_socket);
+            current_socket = -1;
+        }
             break;
         }
         else if(ch == '\n' && pos > 0) {
@@ -346,13 +365,27 @@ void chat_loop() {
             wrefresh(ui.input_win);
         }
     }
-    
+
+    int disc = recv(current_socket, NULL, 0, 0);
+    if(disc <= 0) {
+        add_message("Disconnected from server");
+    } else {
+        add_message("Server closed connection");
+    }
     pthread_cancel(recv_thread);
     pthread_join(recv_thread, NULL);
+    if (p2p_socket != -1) {
+        close(p2p_socket);
+        p2p_socket = -1;
+    }
+    if (current_socket != -1) {
+        close(current_socket);
+        current_socket = -1;
+    }
+    
 }
 
 int main() {
-	initscr();
     get_username();
     init_ui();
     
