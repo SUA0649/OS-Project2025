@@ -9,7 +9,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "192.168.1.18"
 #define SERVER_PORT 8080
 #define MAX_NAME_LEN 32
 #define MAX_MSG 512
