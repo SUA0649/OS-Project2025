@@ -1,16 +1,10 @@
+all: server client
 
-all: server
-	gcc Backend_side/server.c -lncurses -lpthread -o main
-	./main
+server: server.c
+	gcc server.c -o server.exe -lpthread
 
-
-server: Backend_side/server.c
-	@echo "Server file exists."
-
-
-gtk:
-	gcc `pkg-config --cflags gtk4` More_test/gtk_test.c -o gtk_test `pkg-config --libs gtk4`
-	GSK_RENDERER=cairo LIBGL_ALWAYS_SOFTWARE=1 GDK_DEBUG=gl-disable ./gtk_test
+client: client.c
+	gcc client.c -o client.exe -lncurses -lpthread
 
 clean:
-	rm -f main
+	rm -f server.exe client.exe
