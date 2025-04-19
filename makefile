@@ -1,9 +1,9 @@
 all: server client
 
-server: server.c
+server: server.c server.h
 	gcc server.c -o server.exe -lpthread
 
-client: client.c
+client: client.c client.h
 	gcc client.c -o client.exe -lncurses -lpthread
 
 clean:

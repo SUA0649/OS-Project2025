@@ -1,20 +1,23 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <pthread.h>
-#include <stdbool.h>
-#include <sys/queue.h>
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include <string.h>
+// #include <unistd.h>
+// #include <sys/socket.h>
+// #include <netinet/in.h>
+// #include <arpa/inet.h>
+// #include<fcntl.h>
+// #include <pthread.h>
+// #include <stdbool.h>
+// #include <sys/queue.h>
+#include "server.h"
 
-#define MAX_CLIENTS 50
-#define MAX_NAME_LEN 32
-#define MAX_MSG_LEN 512
-#define PORT 8080
-#define MAX_WELCOME_MSG (MAX_MSG_LEN + MAX_NAME_LEN + 20)
-#define QUEUE_SIZE 10
+// #define LOCK_FILE "/tmp/server.lock"
+// #define MAX_CLIENTS 50
+// #define MAX_NAME_LEN 32
+// #define MAX_MSG_LEN 512
+// #define PORT 8080
+// #define MAX_WELCOME_MSG (MAX_MSG_LEN + MAX_NAME_LEN + 20)
+// #define QUEUE_SIZE 10
 
 typedef struct {
     char name[MAX_NAME_LEN];
@@ -42,9 +45,9 @@ int client_count = 0;
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 bool server_running = true;
 
-void broadcast_user_list();
-void remove_client(int index);
-void *thread_worker(void *arg);
+// void broadcast_user_list();
+// void remove_client(int index);
+// void *thread_worker(void *arg);
 
 void add_client(const char *name, const char *ip, int port, int socket) {
     pthread_mutex_lock(&clients_mutex);
@@ -179,7 +182,6 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
         }
     }
     pthread_mutex_unlock(&clients_mutex);
-
     // Chat loop
     while (1) {
         memset(buffer, 0, sizeof(buffer));
@@ -278,7 +280,20 @@ void *thread_worker(void *arg) {
     return NULL;
 }
 
-int main() {
+int main() 
+{
+    signal(SIGINT, handle_sigint);
+    if(access(LOCK_FILE,F_OK)==0){
+        printf("Another instance of a server is running on the local network.");
+        exit(1);
+    }
+
+    int fd= open(LOCK_FILE,O_CREAT | O_RDWR,0666);
+    if(fd<0){
+        perror("Lock file creation failed");
+        exit(1);
+    }
+
     int server_fd;
     struct sockaddr_in address;
     int opt = 1;
@@ -310,13 +325,14 @@ int main() {
         perror("listen");
         exit(EXIT_FAILURE);
     }
-
+    server_socket = server_fd;
     printf("Server listening on port %d\n", PORT);
 
     // Create worker threads
     for (int i = 0; i < MAX_CLIENTS; i++) {
         pthread_create(&worker_threads[i], NULL, thread_worker, NULL);
     }
+
 
     // Main accept loop
     while (server_running) {
@@ -359,7 +375,6 @@ int main() {
         close(clients[i].socket);
     }
     pthread_mutex_unlock(&clients_mutex);
-    
     close(server_fd);
     return 0;
 }
