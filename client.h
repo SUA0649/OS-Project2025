@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include<signal.h>
 #include <stdbool.h>
 
 #define SERVER_IP "192.168.1.12"
@@ -49,12 +50,12 @@ int p2p_socket = -1;
 int p2p_listener = -1;
 
 void handle_sigint(int sig) {
-    printf("\n🔴 Received SIGINT (Ctrl+C)\n");
-    // execlp("rm","rm", "-f","/tmp/server.lock",NULL);
+    /*printf("\n🔴 Received SIGINT (Ctrl+C)\n");
+    execlp("rm","rm", "-f","/tmp/server.lock",NULL);
     unlink(LOCK_FILE);
     if (server_socket >= 0) {
                 close(server_socket);
                 printf("🚪 Server socket closed\n");
             }
-    exit(0);
+    exit(0);*/
 }
