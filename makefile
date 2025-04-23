@@ -8,3 +8,4 @@ client: client.c client.h Utils/cJSON.c
 
 clean:
 	rm -f server.exe client.exe
+	rm -f Logs/*.json
