@@ -63,6 +63,7 @@ void add_message(const char *msg) {
         line = maxy-2;
     }
     
+    // wprintw(ui.chat_win,"%s",msg);
     mvwprintw(ui.chat_win, line++, 1, "%s", msg);
     wrefresh(ui.chat_win);
 }
@@ -135,10 +136,81 @@ int connect_to_peer(const char *ip, int port) {
     return sockfd;
 }
 
+
+void display_previous_chat(){
+    char file[MAX_FILEPATH];
+    snprintf(file,MAX_FILEPATH,"Logs/%s.json",username);
+    char *json_data = read_file(file);
+
+    cJSON *root=NULL;
+
+    if(!json_data){
+        root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root,"username",username);
+        cJSON_AddItemToObject(root,"messages",cJSON_CreateArray()); 
+        return;
+    }
+    else{
+        root = cJSON_Parse(json_data);
+        free(json_data);
+        if(!root){
+            fprintf(stderr,"Failed to parse chat log.");
+            return ;
+        }
+        cJSON *messages = cJSON_GetObjectItem(root,"messages");
+        if(!cJSON_IsArray(messages)){
+            fprintf(stderr,"Wrong format stored in the JSON file.");
+            cJSON_Delete(root);
+            return ;
+        }
+        cJSON *msg=NULL;
+        cJSON_ArrayForEach(msg,messages){
+            if(cJSON_IsString){
+                add_message(msg->valuestring);
+            }
+        }
+    }
+    cJSON_Delete(root);
+}
+    
+void update_log(const char *message) {
+    char file[MAX_FILEPATH];
+    snprintf(file,MAX_FILEPATH,"Logs/%s.json", username);
+
+    char *json_data = read_file(file);
+    cJSON *root = NULL;
+
+    if (json_data) {
+        root = cJSON_Parse(json_data);
+        free(json_data);
+    }
+
+    if (!root) {
+        root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "username", username);
+        cJSON_AddItemToObject(root, "messages", cJSON_CreateArray());
+    }
+
+    cJSON *messages = cJSON_GetObjectItem(root, "messages");
+    if (!cJSON_IsArray(messages)) {
+        messages = cJSON_CreateArray();
+        cJSON_ReplaceItemInObject(root, "messages", messages);
+    }
+    cJSON_AddItemToArray(messages, cJSON_CreateString(message));
+
+    // Save back to file
+    write_file(file, root);
+    cJSON_Delete(root);
+}
+
 void* receive_messages(void *arg) {
     ThreadData *data = (ThreadData *)arg;
     char buffer[MAX_MSG];
     
+
+    // This is where previous chats are implemented from the server system.
+    display_previous_chat();
+
     while(1) {
         memset(buffer, 0, sizeof(buffer));
 
@@ -234,6 +306,7 @@ void* receive_messages(void *arg) {
         }
         else {
             add_message(buffer);
+            update_log(buffer);
         }
     }
     return NULL;
