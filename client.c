@@ -1,6 +1,7 @@
 #include "client.h"
 
 char LOCAL_IP[INET_ADDRSTRLEN];
+int local_port = -1;
 int current_socket = -1;
 int p2p_listener_port = -1;
 char p2p_response = 0;
@@ -88,7 +89,8 @@ int find_available_p2p_port() {
             close(sock);
             continue;
         }
-        
+        local_port = port;
+
         close(sock);
         return port;
     }
@@ -122,8 +124,11 @@ void launch_p2p_server() {
     pid_t pid = fork();
     if (pid == 0) {
         // Child process - launch in pure server mode
-        execlp("x-terminal-emulator", "x-terminal-emulator", "-e", 
-              "./client_p2p.exe", "server",username, NULL);
+        char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%d", local_port);
+        execlp("x-terminal-emulator", "x-terminal-emulator",
+            "-bg", "black", "-fg", "white", "-e",  
+              "./client_p2p.exe", "server", username, port_str, LOCAL_IP, NULL);
         exit(1);
     }
 }
@@ -134,8 +139,8 @@ void launch_p2p_client(const char *peer_ip, int peer_port) {
         // Child process - launch in pure client mode
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", peer_port);   
-        execlp("x-terminal-emulator", "x-terminal-emulator", "-e",
-              "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
+        execlp("x-terminal-emulator", "x-terminal-emulator"
+              ,"-bg", "black", "-fg", "white", "-e", "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
         exit(1);
     }
 }

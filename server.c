@@ -338,6 +338,7 @@ void *thread_worker(void *arg) {
 }
 
 int main() {
+    signal(SIGINT, handle_sigint);
     struct sockaddr_in address;
     int opt = 1;
     pthread_t worker_threads[MAX_CLIENTS];

@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <sys/queue.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #define LOCK_FILE "/tmp/server.lock"
 #define MAX_CLIENTS 50
@@ -42,8 +43,7 @@ void send_p2p_invitation(const char* requester_name, const char* requester_ip, i
 // SIGINT handler
 void handle_sigint(int sig) {
     printf("\n🔴 Received SIGINT (Ctrl+C)\n");
-    execlp("rm","rm", "-f","/tmp/server.lock",NULL);
-    //unlink(LOCK_FILE);
+    unlink(LOCK_FILE);
     if (server_fd >= 0) {
                 close(server_fd);
                 printf("🚪 Server socket closed\n");

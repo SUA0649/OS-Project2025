@@ -3,7 +3,6 @@
 // Shared variables needed for P2P client
 UI ui;
 
-
 // Forward declarations different from client.c
 void init_ui();
 void add_message(const char *msg);
@@ -12,16 +11,21 @@ void* receive_messages(void *arg);
 
 int main(int argc, char *argv[]) {
     
-    if (argc == 2 && strcmp(argv[1], "server") == 0) {
+    if (argc == 5 && strcmp(argv[1], "server") == 0) {
         // SERVER MODE - Full listener implementation
         init_ui();
+        strcpy(username, argv[2]);
+        int p2p_port = atoi(argv[3]);
+        char temp[MAX_MSG];
+        snprintf(temp, sizeof(temp), "P2P Server Port: %s : Server IP: %s", argv[3], argv[4]);
+        add_message(temp);
         add_message("P2P Server started. Waiting for connections...");
         
         int listener = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in addr = {
             .sin_family = AF_INET,
             .sin_addr.s_addr = INADDR_ANY,
-            .sin_port = htons(P2P_PORT_START)
+            .sin_port = htons(p2p_port)
         };
         
         // Set socket options
@@ -58,11 +62,14 @@ int main(int argc, char *argv[]) {
 
     else if (argc >= 4 && strcmp(argv[1], "client") == 0) {
         // CLIENT MODE - Connect to existing server
+        strcpy(username, argv[2]);
         char *peer_ip = argv[3];
         int peer_port = atoi(argv[4]);
-        
         init_ui();
-        add_message("Connecting to peer...");
+        char temp[MAX_MSG];
+        snprintf(temp, sizeof(temp), "Connecting to Server Port: %s : Server IP: %s", argv[3], argv[4]);
+        add_message(temp);
+        sleep(1);
         p2p_socket = connect_to_peer(peer_ip, peer_port);
     }
     else {
@@ -96,7 +103,9 @@ int main(int argc, char *argv[]) {
             break;
         }
         else if(ch == '\n' && pos > 0) {
-            send(p2p_socket, input, strlen(input), 0);
+            char formatted_msg[MAX_MSG + 20];
+            snprintf(formatted_msg, sizeof(formatted_msg), "%s: %s", username, input);
+            send(p2p_socket, formatted_msg, strlen(formatted_msg), 0);
             pos = 0;
             memset(input, 0, sizeof(input));
             wmove(ui.input_win, 1, 2);
@@ -156,15 +165,12 @@ void add_message(const char *msg) {
         line = maxy-2;
     }
     
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    char timestamp[9];
-    strftime(timestamp, sizeof(timestamp), "%H:%M:%S", t);
+    // time_t now = time(NULL);
+    // struct tm *t = localtime(&now);
+    // char timestamp[9];
+    // strftime(timestamp, sizeof(timestamp), "%H:%M:%S", t);
     
-    char formatted_msg[MAX_MSG + 20];
-    snprintf(formatted_msg, sizeof(formatted_msg), "[%s] %s", timestamp, msg);
-    
-    mvwprintw(ui.chat_win, line++, 1, "%-*.*s", maxx-2, maxx-2, formatted_msg);
+    mvwprintw(ui.chat_win, line++, 1, "%-*.*s", maxx-2, maxx-2, msg);
     wrefresh(ui.chat_win);
 }
 
