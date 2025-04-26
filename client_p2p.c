@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
         int peer_port = atoi(argv[4]);
         init_ui();
         char temp[MAX_MSG];
-        snprintf(temp, sizeof(temp), "Connecting to Server Port: %s : Server IP: %s", argv[3], argv[4]);
+        snprintf(temp, sizeof(temp), "Connecting to Server Port: %d : Server IP: %s", peer_port, peer_ip);
         add_message(temp);
         sleep(1);
         p2p_socket = connect_to_peer(peer_ip, peer_port);

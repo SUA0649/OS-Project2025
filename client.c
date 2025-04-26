@@ -140,7 +140,8 @@ void launch_p2p_client(const char *peer_ip, int peer_port) {
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", peer_port);   
         execlp("x-terminal-emulator", "x-terminal-emulator"
-              ,"-bg", "black", "-fg", "white", "-e", "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
+              ,"-bg", "black", "-fg", "white", "-e", 
+              "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
         exit(1);
     }
 }
