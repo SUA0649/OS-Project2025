@@ -12,119 +12,70 @@ void* receive_messages(void *arg);
 int main(int argc, char *argv[]) {
     
     if (argc == 5 && strcmp(argv[1], "server") == 0) {
-        // SERVER MODE
+        // SERVER MODE - Full listener implementation
         init_ui();
         strcpy(username, argv[2]);
         int p2p_port = atoi(argv[3]);
-        char *server_ip = argv[4];
-
-        // Debug message
-        char debug_msg[100];
-        snprintf(debug_msg, sizeof(debug_msg), "Starting P2P server with: IP=%s, Port=%d", 
-                 server_ip, p2p_port);
-        add_message(debug_msg);
-
-        // Create listener socket
+        char temp[MAX_MSG];
+        snprintf(temp, sizeof(temp), "P2P Server Port: %s : Server IP: %s", argv[3], argv[4]);
+        add_message(temp);
+        add_message("P2P Server started. Waiting for connections...");
+        
         int listener = socket(AF_INET, SOCK_STREAM, 0);
-        if (listener < 0) {
-            add_message("Failed to create socket");
-            perror("socket");
-            endwin();
-            return 1;
-        }
-
-        // Set socket options
-        int opt = 1;
-        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) < 0) {
-            add_message("Socket options failed");
-            perror("setsockopt");
-            close(listener);
-            endwin();
-            return 1;
-        }
-
         struct sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;  // Accept connections from any interface
         addr.sin_port = htons(p2p_port);
-        addr.sin_addr.s_addr = INADDR_ANY; // Bind to all interfaces
 
-        // Bind the socket
+        // Add socket options
+        int opt = 1;
+        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
         if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            add_message("Bind failed. Is the port already in use?");
-            perror("bind");
-            close(listener);
+            add_message("Bind failed - port may be in use");
             endwin();
             return 1;
         }
 
-        // Start listening
         if (listen(listener, 5) < 0) {
             add_message("Listen failed");
-            perror("listen");
-            close(listener);
             endwin();
             return 1;
         }
 
-        // Log successful binding
-        snprintf(debug_msg, sizeof(debug_msg), "P2P Server listening on port %d", p2p_port);
-        add_message(debug_msg);
         add_message("Waiting for peer connection...");
-
+        
         // Accept connection
         struct sockaddr_in peer_addr;
         socklen_t addr_len = sizeof(peer_addr);
         p2p_socket = accept(listener, (struct sockaddr*)&peer_addr, &addr_len);
-        close(listener);  // Close listener after accepting
-
+        close(listener);
+        
         if (p2p_socket < 0) {
             add_message("Accept failed!");
-            perror("accept");
             endwin();
             return 1;
         }
-
-        // Send acknowledgment to the peer
-        const char *ack_msg = "Connection accepted by P2P server";
-        if (send(p2p_socket, ack_msg, strlen(ack_msg), 0) < 0) {
-            add_message("Failed to send acknowledgment to peer");
-            perror("send");
-            close(p2p_socket);
-            endwin();
-            return 1;
-        }
-
-        add_message("Acknowledgment sent to peer");
-
-        // Log successful connection
+        
         char peer_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &peer_addr.sin_addr, peer_ip, INET_ADDRSTRLEN);
-        char msg[100];
-        snprintf(msg, sizeof(msg), "Connected to peer at %s:%d", 
-                 peer_ip, ntohs(peer_addr.sin_port));
+        char msg[MAX_MSG];
+        snprintf(msg, sizeof(msg), "Connected to %s:%d", 
+                peer_ip, ntohs(peer_addr.sin_port));
         add_message(msg);
     }
 
     else if (argc >= 4 && strcmp(argv[1], "client") == 0) {
-        // CLIENT MODE
-        init_ui();
+        // CLIENT MODE - Connect to existing server
         strcpy(username, argv[2]);
         char *peer_ip = argv[3];
         int peer_port = atoi(argv[4]);
-
-        char msg[100];
-        snprintf(msg, sizeof(msg), "Attempting to connect to %s:%d", peer_ip, peer_port);
-        add_message(msg);
-        
-        sleep(1);  // Give server time to start
+        init_ui();
+        char temp[MAX_MSG];
+        snprintf(temp, sizeof(temp), "Connecting to Server Port: %d : Server IP: %s", peer_port, peer_ip);
+        add_message(temp);
+        sleep(1);
         p2p_socket = connect_to_peer(peer_ip, peer_port);
-        
-        if (p2p_socket < 0) {
-            add_message("Failed to connect to peer");
-            endwin();
-            return 1;
-        }
     }
     else {
         fprintf(stderr, "Usage (server): %s server\n", argv[0]);
@@ -231,49 +182,17 @@ void add_message(const char *msg) {
 // Implement network functions
 int connect_to_peer(const char *ip, int port) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        add_message("Socket creation failed");
-        perror("socket");
-        return -1;
-    }
+    if(sockfd < 0) return -1;
 
     struct sockaddr_in peer_addr;
-    memset(&peer_addr, 0, sizeof(peer_addr));
     peer_addr.sin_family = AF_INET;
     peer_addr.sin_port = htons(port);
+    inet_pton(AF_INET, ip, &peer_addr.sin_addr);
 
-    if (inet_pton(AF_INET, ip, &peer_addr.sin_addr) <= 0) {
-        add_message("Invalid peer IP address format");
-        perror("inet_pton");
+    if(connect(sockfd, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) < 0) {
         close(sockfd);
         return -1;
     }
-
-    char msg[100];
-    snprintf(msg, sizeof(msg), "Connecting to peer at %s:%d...", ip, port);
-    add_message(msg);
-
-    if (connect(sockfd, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) < 0) {
-        add_message("Connection to peer failed");
-        perror("connect");
-        close(sockfd);
-        return -1;
-    }
-
-    add_message("Connected to peer successfully!");
-
-    // Wait for acknowledgment from the server
-    char ack_buffer[MAX_MSG] = {0};
-    if (recv(sockfd, ack_buffer, sizeof(ack_buffer), 0) <= 0) {
-        add_message("Failed to receive acknowledgment from peer");
-        perror("recv");
-        close(sockfd);
-        return -1;
-    }
-
-    char ack_msg[100];
-    snprintf(ack_msg, sizeof(ack_msg), "Peer acknowledgment: %s", ack_buffer);
-    add_message(ack_msg);
 
     return sockfd;
 }
@@ -288,21 +207,10 @@ void* receive_messages(void *arg) {
         
         if(valread <= 0) {
             add_message("Peer disconnected");
-            p2p_socket = -1;  // Mark as disconnected
             break;
         }
         
-        // Format messages like server does
-        char formatted_msg[MAX_MSG];
-        if(strncmp(buffer, username, strlen(username)) == 0) {
-            // Own message
-            snprintf(formatted_msg, sizeof(formatted_msg), "You: %s", 
-                    buffer + strlen(username) + 2);
-        } else {
-            // Peer message
-            strncpy(formatted_msg, buffer, sizeof(formatted_msg)-1);
-        }
-        add_message(formatted_msg);
+        add_message(buffer);
     }
     return NULL;
 }

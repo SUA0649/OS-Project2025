@@ -135,7 +135,7 @@ void start_p2p_listener() {
 
 void launch_p2p_server() {
     char msg[100];
-    snprintf(msg, sizeof(msg), "Starting P2P server on %s:%d", SERVER_IP, local_port);
+    snprintf(msg, sizeof(msg), "Starting P2P server on %s:%d", LOCAL_IP, local_port);
     add_message(msg);
     
     pid_t pid = fork();
@@ -161,12 +161,11 @@ void launch_p2p_server() {
         
         struct sockaddr_in addr;
         addr.sin_family = AF_INET;
-        inet_pton(AF_INET, SERVER_IP, &addr.sin_addr); // Bind to server IP instead of INADDR_ANY
+        addr.sin_addr.s_addr = INADDR_ANY;
         addr.sin_port = htons(local_port);
         
         if (bind(server_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
             add_message("Failed to bind server socket");
-            perror("bind");  // Print actual error
             close(server_sock);
             exit(1);
         }
@@ -181,7 +180,7 @@ void launch_p2p_server() {
         
         execlp("x-terminal-emulator", "x-terminal-emulator",
                "-bg", "black", "-fg", "white", "-e",  
-               "./client_p2p.exe", "server", username, port_str, SERVER_IP, NULL);
+               "./client_p2p.exe", "server", username, port_str, LOCAL_IP, NULL);
         exit(1);
     }
 }
@@ -370,20 +369,23 @@ int connect_to_peer(const char *ip, int port) {
         return -1;
     }
 
-    // Always connect to server IP
     struct sockaddr_in peer_addr;
     peer_addr.sin_family = AF_INET;
     peer_addr.sin_port = htons(port);
-    inet_pton(AF_INET, SERVER_IP, &peer_addr.sin_addr);
+    
+    if (inet_pton(AF_INET, ip, &peer_addr.sin_addr) <= 0) {
+        add_message("Invalid IP address format");
+        close(sockfd);
+        return -1;
+    }
 
     // Add debug message
     char msg[100];
-    snprintf(msg, sizeof(msg), "Attempting to connect to %s:%d", SERVER_IP, port);
+    snprintf(msg, sizeof(msg), "Attempting to connect to %s:%d", ip, port);
     add_message(msg);
 
     if(connect(sockfd, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) < 0) {
         add_message("Connection failed");
-        perror("connect");  // Print actual error
         close(sockfd);
         return -1;
     }
