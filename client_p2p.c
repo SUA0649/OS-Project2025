@@ -1,4 +1,5 @@
 #include "client.h"
+#include <ifaddrs.h>  // Add this for getifaddrs and struct ifaddrs
 
 // Shared variables needed for P2P client
 UI ui;
@@ -19,27 +20,37 @@ int main(int argc, char *argv[]) {
         add_message("P2P Server started. Waiting for connections...");
         
         // Get local IP address
-        char local_ip[INET_ADDRSTRLEN];
+        char local_ip[INET_ADDRSTRLEN] = "192.168.1.12";  // Default to localhost
         struct ifaddrs *ifaddr, *ifa;
         if (getifaddrs(&ifaddr) == -1) {
             perror("getifaddrs");
-            exit(EXIT_FAILURE);
-        }
-
-        // Find the first non-loopback IPv4 address
-        for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-            if (ifa->ifa_addr == NULL) continue;
-            if (ifa->ifa_addr->sa_family == AF_INET) {
-                struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
-                if (strcmp(inet_ntoa(sa->sin_addr), "127.0.0.1") != 0) {
-                    strcpy(local_ip, inet_ntoa(sa->sin_addr));
-                    break;
+            add_message("Warning: Could not get local IP, using localhost");
+        } else {
+            // Find the first non-loopback IPv4 address
+            for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+                if (ifa->ifa_addr == NULL) continue;
+                if (ifa->ifa_addr->sa_family == AF_INET) {
+                    struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
+                    if (strcmp(inet_ntoa(sa->sin_addr), "192.168.1.12") != 0) {
+                        strcpy(local_ip, inet_ntoa(sa->sin_addr));
+                        break;
+                    }
                 }
             }
+            freeifaddrs(ifaddr);
         }
-        freeifaddrs(ifaddr);
+
+        char debug_msg[MAX_MSG];
+        snprintf(debug_msg, sizeof(debug_msg), "Server IP: %s, Port: %d", local_ip, P2P_PORT_START);
+        add_message(debug_msg);
 
         int listener = socket(AF_INET, SOCK_STREAM, 0);
+        if (listener < 0) {
+            add_message("Socket creation failed!");
+            endwin();
+            return 1;
+        }
+        
         struct sockaddr_in addr = {
             .sin_family = AF_INET,
             .sin_addr.s_addr = INADDR_ANY,
@@ -48,15 +59,29 @@ int main(int argc, char *argv[]) {
         
         // Set socket options
         int opt = 1;
-        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-        
-        if (bind(listener, (struct sockaddr*)&addr, sizeof(addr))){
-            add_message("Bind failed!");
+        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+            add_message("Setsockopt failed!");
+            close(listener);
             endwin();
             return 1;
         }
         
-        listen(listener, 5);  // Allow up to 5 pending connections
+        if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            snprintf(debug_msg, sizeof(debug_msg), "Bind failed! Error: %s", strerror(errno));
+            add_message(debug_msg);
+            close(listener);
+            endwin();
+            return 1;
+        }
+        
+        if (listen(listener, 5) < 0) {
+            add_message("Listen failed!");
+            close(listener);
+            endwin();
+            return 1;
+        }
+        
+        add_message("Server is listening for connections...");
         
         // Accept connection
         struct sockaddr_in peer_addr;
@@ -64,7 +89,8 @@ int main(int argc, char *argv[]) {
         p2p_socket = accept(listener, (struct sockaddr*)&peer_addr, &addr_len);
         
         if (p2p_socket < 0) {
-            add_message("Accept failed!");
+            snprintf(debug_msg, sizeof(debug_msg), "Accept failed! Error: %s", strerror(errno));
+            add_message(debug_msg);
             close(listener);
             endwin();
             return 1;
@@ -76,12 +102,13 @@ int main(int argc, char *argv[]) {
         // Send local IP to the connecting peer
         char ip_msg[MAX_MSG];
         snprintf(ip_msg, sizeof(ip_msg), "SERVER_IP:%s", local_ip);
-        send(p2p_socket, ip_msg, strlen(ip_msg), 0);
+        if (send(p2p_socket, ip_msg, strlen(ip_msg), 0) < 0) {
+            add_message("Failed to send server IP!");
+        }
         
-        char msg[MAX_MSG];
-        snprintf(msg, sizeof(msg), "Connected to %s:%d", 
+        snprintf(debug_msg, sizeof(debug_msg), "Connected to peer %s:%d", 
                 peer_ip, ntohs(peer_addr.sin_port));
-        add_message(msg);
+        add_message(debug_msg);
         
         close(listener);  // Close listener after accepting one connection
     }
@@ -93,10 +120,15 @@ int main(int argc, char *argv[]) {
         int peer_port = atoi(argv[4]);
         
         init_ui();
-        add_message("Connecting to peer...");
+        char debug_msg[MAX_MSG];
+        snprintf(debug_msg, sizeof(debug_msg), "Attempting to connect to %s:%d", peer_ip, peer_port);
+        add_message(debug_msg);
+        
         p2p_socket = connect_to_peer(peer_ip, peer_port);
         
         if (p2p_socket >= 0) {
+            add_message("Connection established, waiting for server IP...");
+            
             // Wait for server's IP message
             char buffer[MAX_MSG] = {0};
             int bytes = recv(p2p_socket, buffer, MAX_MSG - 1, 0);
@@ -104,11 +136,25 @@ int main(int argc, char *argv[]) {
                 if (strncmp(buffer, "SERVER_IP:", 10) == 0) {
                     char server_ip[INET_ADDRSTRLEN];
                     strncpy(server_ip, buffer + 10, INET_ADDRSTRLEN - 1);
-                    char msg[MAX_MSG];
-                    snprintf(msg, sizeof(msg), "Connected to server at %s", server_ip);
-                    add_message(msg);
+                    snprintf(debug_msg, sizeof(debug_msg), "Connected to server at %s", server_ip);
+                    add_message(debug_msg);
+                } else {
+                    snprintf(debug_msg, sizeof(debug_msg), "Received unexpected message: %s", buffer);
+                    add_message(debug_msg);
                 }
+            } else if (bytes == 0) {
+                add_message("Server closed the connection");
+                close(p2p_socket);
+                p2p_socket = -1;
+            } else {
+                snprintf(debug_msg, sizeof(debug_msg), "Error receiving server IP: %s", strerror(errno));
+                add_message(debug_msg);
+                close(p2p_socket);
+                p2p_socket = -1;
             }
+        } else {
+            snprintf(debug_msg, sizeof(debug_msg), "Connection failed: %s", strerror(errno));
+            add_message(debug_msg);
         }
     }
     else {
