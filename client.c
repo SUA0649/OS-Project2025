@@ -327,7 +327,7 @@ void* receive_messages(void *arg) {
             }
             continue;
         }
-        else{
+        else if(strncmp(buffer,"charUSERS",9) != 0){
                 // Handle regular messages
                 add_message(buffer);
     
