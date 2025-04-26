@@ -135,7 +135,7 @@ void start_p2p_listener() {
 
 void launch_p2p_server() {
     char msg[100];
-    snprintf(msg, sizeof(msg), "Starting P2P server on %s:%d", LOCAL_IP, local_port);
+    snprintf(msg, sizeof(msg), "Starting P2P chat on %s:%d", LOCAL_IP, local_port);
     add_message(msg);
     
     pid_t pid = fork();
@@ -144,16 +144,10 @@ void launch_p2p_server() {
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", local_port);
         
-        // Try xterm first (common in WSL)
-        execlp("xterm", "xterm", "-hold", "-e", 
-               "./client_p2p.exe", "server", username, port_str, "0.0.0.0", NULL);
+        // Launch P2P client in listening mode
+        execlp("./client_p2p.exe", "client_p2p.exe", "p2p", username, "0.0.0.0", port_str, NULL);
         
-        // If xterm fails, try gnome-terminal
-        execlp("gnome-terminal", "gnome-terminal", "--", 
-               "./client_p2p.exe", "server", username, port_str, "0.0.0.0", NULL);
-        
-        // If all terminals fail, log error
-        add_message("Failed to launch terminal. Install xterm with: sudo apt install xterm");
+        add_message("Failed to launch P2P chat");
         exit(1);
     }
 }
@@ -168,15 +162,10 @@ void launch_p2p_client(const char *peer_ip, int peer_port) {
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", peer_port);
         
-        // Try xterm first
-        execlp("xterm", "xterm", "-hold", "-e",
-               "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
+        // Launch P2P client in connection mode
+        execlp("./client_p2p.exe", "client_p2p.exe", "p2p", username, peer_ip, port_str, NULL);
         
-        // Try gnome-terminal as fallback
-        execlp("gnome-terminal", "gnome-terminal", "--",
-               "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
-        
-        add_message("Failed to launch terminal. Install xterm with: sudo apt install xterm");
+        add_message("Failed to launch P2P chat");
         exit(1);
     }
 }
