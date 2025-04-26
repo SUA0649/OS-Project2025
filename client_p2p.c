@@ -48,21 +48,41 @@ int main(int argc, char *argv[]) {
         addr.sin_family = AF_INET;
         addr.sin_port = htons(p2p_port);
         
-        // In WSL, bind to 0.0.0.0 to accept connections through port proxy
+        // First try binding to INADDR_ANY (0.0.0.0)
         addr.sin_addr.s_addr = INADDR_ANY;
 
-        // Single bind attempt for WSL
+        // Debug message
+        add_message("Attempting to bind to 0.0.0.0 first...");
+
         if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            char error_msg[100];
-            snprintf(error_msg, sizeof(error_msg), "WSL bind failed on port %d", p2p_port);
-            add_message(error_msg);
-            add_message("Check if port proxy is properly configured:");
-            add_message("netsh interface portproxy show v4tov4");
-            perror("bind");
-            close(listener);
-            endwin();
-            return 1;
+            // If INADDR_ANY fails, try specific IP
+            add_message("INADDR_ANY bind failed, trying specific IP...");
+            
+            if (inet_pton(AF_INET, server_ip, &addr.sin_addr) <= 0) {
+                add_message("Invalid IP address format");
+                perror("inet_pton");
+                close(listener);
+                endwin();
+                return 1;
+            }
+
+            if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+                char error_msg[100];
+                snprintf(error_msg, sizeof(error_msg), "Bind failed on %s:%d", server_ip, p2p_port);
+                add_message(error_msg);
+                perror("bind");
+                close(listener);
+                endwin();
+                return 1;
+            }
         }
+
+        // Add successful bind message
+        char bound_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &addr.sin_addr, bound_ip, INET_ADDRSTRLEN);
+        char success_msg[100];
+        snprintf(success_msg, sizeof(success_msg), "Successfully bound to %s:%d", bound_ip, p2p_port);
+        add_message(success_msg);
 
         if (listen(listener, 5) < 0) {
             add_message("Listen failed");
