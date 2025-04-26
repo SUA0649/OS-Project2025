@@ -79,18 +79,30 @@ int find_available_p2p_port() {
         int sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock < 0) continue;
         
+        // Add socket options for reuse
+        int opt = 1;
+        if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+            close(sock);
+            continue;
+        }
+        
         struct sockaddr_in addr;
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = INADDR_ANY;
         addr.sin_port = htons(port);
         
-    
-        if (bind(sock, (struct sockaddr *)&addr, sizeof(addr))) {
+        if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
             close(sock);
             continue;
         }
+        
+        // Test if we can listen on this port
+        if (listen(sock, 5) < 0) {
+            close(sock);
+            continue;
+        }
+        
         local_port = port;
-
         close(sock);
         return port;
     }
@@ -116,24 +128,68 @@ void start_p2p_listener() {
     
     
     snprintf(port_msg, sizeof(port_msg), "P2P_PORT:%d", p2p_listener_port);
+    sleep(1);
     send_to_current(port_msg);
     
 }
 
 void launch_p2p_server() {
+    char msg[100];
+    snprintf(msg, sizeof(msg), "Starting P2P server on %s:%d", SERVER_IP, local_port);
+    add_message(msg);
+    
     pid_t pid = fork();
     if (pid == 0) {
         // Child process - launch in pure server mode
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", local_port);
+        
+        // Create socket before exec
+        int server_sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_sock < 0) {
+            add_message("Failed to create server socket");
+            exit(1);
+        }
+        
+        // Set socket options
+        int opt = 1;
+        if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+            add_message("Failed to set socket options");
+            close(server_sock);
+            exit(1);
+        }
+        
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        inet_pton(AF_INET, SERVER_IP, &addr.sin_addr); // Bind to server IP instead of INADDR_ANY
+        addr.sin_port = htons(local_port);
+        
+        if (bind(server_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            add_message("Failed to bind server socket");
+            perror("bind");  // Print actual error
+            close(server_sock);
+            exit(1);
+        }
+        
+        if (listen(server_sock, 5) < 0) {
+            add_message("Failed to listen on server socket");
+            close(server_sock);
+            exit(1);
+        }
+        
+        close(server_sock); // Close before exec
+        
         execlp("x-terminal-emulator", "x-terminal-emulator",
-            "-bg", "black", "-fg", "white", "-e",  
-              "./client_p2p.exe", "server", username, port_str, LOCAL_IP, NULL);
+               "-bg", "black", "-fg", "white", "-e",  
+               "./client_p2p.exe", "server", username, port_str, SERVER_IP, NULL);
         exit(1);
     }
 }
 
 void launch_p2p_client(const char *peer_ip, int peer_port) {
+    char msg[100];
+    snprintf(msg, sizeof(msg), "Connecting to peer at %s:%d", peer_ip, peer_port);
+    add_message(msg);
     pid_t pid = fork();
     if (pid == 0) {
         // Child process - launch in pure client mode
@@ -309,14 +365,25 @@ int connect_to_server() {
 
 int connect_to_peer(const char *ip, int port) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if(sockfd < 0) return -1;
+    if(sockfd < 0) {
+        add_message("Socket creation failed");
+        return -1;
+    }
 
+    // Always connect to server IP
     struct sockaddr_in peer_addr;
     peer_addr.sin_family = AF_INET;
     peer_addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip, &peer_addr.sin_addr);
+    inet_pton(AF_INET, SERVER_IP, &peer_addr.sin_addr);
+
+    // Add debug message
+    char msg[100];
+    snprintf(msg, sizeof(msg), "Attempting to connect to %s:%d", SERVER_IP, port);
+    add_message(msg);
 
     if(connect(sockfd, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) < 0) {
+        add_message("Connection failed");
+        perror("connect");  // Print actual error
         close(sockfd);
         return -1;
     }
@@ -519,30 +586,56 @@ void handle_sigint(int sig) {
     exit(0);
 }
 
+void get_lan_ip() {
+    struct sockaddr_in addr;
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    
+    // Connect to server IP to get correct network interface
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(SERVER_PORT);
+    inet_pton(AF_INET, SERVER_IP, &addr.sin_addr);
+    
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+        socklen_t len = sizeof(addr);
+        getsockname(sock, (struct sockaddr*)&addr, &len);
+        inet_ntop(AF_INET, &addr.sin_addr, LOCAL_IP, INET_ADDRSTRLEN);
+    }
+    close(sock);
+}
+
+void handle_p2p_message(char *buffer) {
+    if (strncmp(buffer, "P2P_CONNECT:", 12) == 0) {
+        char *ip = strtok(buffer + 12, ":");
+        char *port_str = strtok(NULL, ":");
+        
+        if (ip && port_str) {
+            int port = atoi(port_str);
+            char debug_msg[100];
+            snprintf(debug_msg, sizeof(debug_msg), "Initiating P2P connection to %s:%d", ip, port);
+            add_message(debug_msg);
+            
+            launch_p2p_server();
+            sleep(1);  // Give server time to start
+            
+            // Try connecting to peer
+            current_socket = connect_to_peer(ip, port);
+            if (current_socket >= 0) {
+                add_message("P2P connection established successfully!");
+                current_conn_type = CONN_P2P;
+            } else {
+                add_message("Failed to establish P2P connection");
+            }
+        }
+    }
+}
+
 int main() {
     signal(SIGINT,handle_sigint);
     get_username();
     // Get valid port
     init_ui();
 
-    struct sockaddr_in serv;
-    serv.sin_family = AF_INET;
-    serv.sin_addr.s_addr = inet_addr("8.8.8.8"); // Google DNS
-    serv.sin_port = htons(53); // DNS port
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd < 0 || connect(fd, (struct sockaddr *)&serv, sizeof(serv))) {
-        close(fd);
-        endwin();
-        fprintf(stderr, "Connection failed\n");
-        return 1;
-    }
-    
-    struct sockaddr_in name;
-    socklen_t namelen = sizeof(name);
-    getsockname(fd, (struct sockaddr *)&name, &namelen);
-    inet_ntop(AF_INET, &name.sin_addr, LOCAL_IP, INET_ADDRSTRLEN);
-    close(fd);
-
+    get_lan_ip();
 
     current_socket = connect_to_server();
     if(current_socket < 0) {
