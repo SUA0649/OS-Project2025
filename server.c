@@ -14,8 +14,7 @@ void remove_client(int index);
 void *thread_worker(void *arg);
 
 void handle_p2p_request(int client_sock, const char* target_name) {
-    pthread_mutex_lock(&clients_mutex);
-    //printf("Hello world\n");    
+    pthread_mutex_lock(&clients_mutex);  
     // Find requester info
     ClientInfo requester = {0};
     int requester_found = 0;
@@ -64,7 +63,6 @@ void send_p2p_invitation(const char* requester_name, const char* requester_ip,
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < client_count; i++) {
         if (strcmp(clients[i].name, target_name) == 0) {
-            //printf("\n\n%s %s %d %s\n",requester_name, requester_ip, requester_port, target_name);
             send(clients[i].socket, invitation, strlen(invitation), 0);
             break;
         }
@@ -160,9 +158,6 @@ void broadcast_user_list() {
     for (int i = 0; i < client_count; i++) {
         send(clients[i].socket, user_list, strlen(user_list) + 1, 0);
     }
-    //fflush(stdout);
-    //printf("%s   ",user_list);
-    //fflush(stdout);
     
     free(user_list);
     pthread_mutex_unlock(&clients_mutex);

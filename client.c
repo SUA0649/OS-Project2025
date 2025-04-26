@@ -496,7 +496,12 @@ void handle_sigint(int sig) {
     
     if (current_socket != -1) {
         send_to_current("/quit");
+        close(current_socket);
     }
+    if(p2p_socket != -1) {
+        close(p2p_socket);
+    }
+    
     endwin();
     exit(0);
 }
