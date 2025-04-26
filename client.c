@@ -104,6 +104,7 @@ void start_p2p_listener() {
     // Tell server our P2P port
     char port_msg[32];
     snprintf(port_msg, sizeof(port_msg), "P2P_PORT:%d", p2p_listener_port);
+    sleep(1);
     send_to_current(port_msg);
     
 }

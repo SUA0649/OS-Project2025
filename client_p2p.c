@@ -17,6 +17,28 @@ int main(int argc, char *argv[]) {
         strcpy(current_username, argv[2]);
         init_ui();
         add_message("P2P Server started. Waiting for connections...");
+        
+        // Get local IP address
+        char local_ip[INET_ADDRSTRLEN];
+        struct ifaddrs *ifaddr, *ifa;
+        if (getifaddrs(&ifaddr) == -1) {
+            perror("getifaddrs");
+            exit(EXIT_FAILURE);
+        }
+
+        // Find the first non-loopback IPv4 address
+        for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+            if (ifa->ifa_addr == NULL) continue;
+            if (ifa->ifa_addr->sa_family == AF_INET) {
+                struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
+                if (strcmp(inet_ntoa(sa->sin_addr), "127.0.0.1") != 0) {
+                    strcpy(local_ip, inet_ntoa(sa->sin_addr));
+                    break;
+                }
+            }
+        }
+        freeifaddrs(ifaddr);
+
         int listener = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in addr = {
             .sin_family = AF_INET,
@@ -34,26 +56,34 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         
-        listen(listener, 1);
+        listen(listener, 5);  // Allow up to 5 pending connections
         
         // Accept connection
         struct sockaddr_in peer_addr;
         socklen_t addr_len = sizeof(peer_addr);
         p2p_socket = accept(listener, (struct sockaddr*)&peer_addr, &addr_len);
-        close(listener);
         
         if (p2p_socket < 0) {
             add_message("Accept failed!");
+            close(listener);
             endwin();
             return 1;
         }
         
         char peer_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &peer_addr.sin_addr, peer_ip, INET_ADDRSTRLEN);
+        
+        // Send local IP to the connecting peer
+        char ip_msg[MAX_MSG];
+        snprintf(ip_msg, sizeof(ip_msg), "SERVER_IP:%s", local_ip);
+        send(p2p_socket, ip_msg, strlen(ip_msg), 0);
+        
         char msg[MAX_MSG];
         snprintf(msg, sizeof(msg), "Connected to %s:%d", 
                 peer_ip, ntohs(peer_addr.sin_port));
         add_message(msg);
+        
+        close(listener);  // Close listener after accepting one connection
     }
 
     else if (argc >= 4 && strcmp(argv[1], "client") == 0) {
@@ -65,6 +95,21 @@ int main(int argc, char *argv[]) {
         init_ui();
         add_message("Connecting to peer...");
         p2p_socket = connect_to_peer(peer_ip, peer_port);
+        
+        if (p2p_socket >= 0) {
+            // Wait for server's IP message
+            char buffer[MAX_MSG] = {0};
+            int bytes = recv(p2p_socket, buffer, MAX_MSG - 1, 0);
+            if (bytes > 0) {
+                if (strncmp(buffer, "SERVER_IP:", 10) == 0) {
+                    char server_ip[INET_ADDRSTRLEN];
+                    strncpy(server_ip, buffer + 10, INET_ADDRSTRLEN - 1);
+                    char msg[MAX_MSG];
+                    snprintf(msg, sizeof(msg), "Connected to server at %s", server_ip);
+                    add_message(msg);
+                }
+            }
+        }
     }
     else {
         fprintf(stderr, "Usage (server): %s server\n", argv[0]);
@@ -193,14 +238,29 @@ void* receive_messages(void *arg) {
     
     while(1) {
         memset(buffer, 0, sizeof(buffer));
-        int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
+        int bytes = recv(data->sockfd, buffer, MAX_MSG - 1, 0);
         
-        if(valread <= 0) {
-            add_message("Peer disconnected");
+        if(bytes <= 0) {
+            add_message("Connection closed");
             break;
         }
         
-        add_message(buffer);
+        // Handle server IP message
+        if (strncmp(buffer, "SERVER_IP:", 10) == 0) {
+            char server_ip[INET_ADDRSTRLEN];
+            strncpy(server_ip, buffer + 10, INET_ADDRSTRLEN - 1);
+            char msg[MAX_MSG];
+            snprintf(msg, sizeof(msg), "Connected to server at %s", server_ip);
+            add_message(msg);
+            continue;
+        }
+        
+        // Handle regular messages
+        char formatted_msg[MAX_MSG + MAX_NAME_LEN + 2];
+        snprintf(formatted_msg, sizeof(formatted_msg), "%s: %s", 
+                current_username, buffer);
+        add_message(formatted_msg);
     }
+    
     return NULL;
 }
