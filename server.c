@@ -15,7 +15,7 @@ void *thread_worker(void *arg);
 
 void handle_p2p_request(int client_sock, const char* target_name) {
     pthread_mutex_lock(&clients_mutex);
-    //printf("Hello world\n");    
+
     // Find requester info
     ClientInfo requester = {0};
     int requester_found = 0;
@@ -26,31 +26,35 @@ void handle_p2p_request(int client_sock, const char* target_name) {
             break;
         }
     }
-    
+
     if (!requester_found) {
         pthread_mutex_unlock(&clients_mutex);
         return;
     }
-    
+
     // Find target client
     int target_found = 0;
     for (int i = 0; i < client_count; i++) {
         if (strcmp(clients[i].name, target_name) == 0) {
             target_found = 1;
+
             // Send invitation to target
+            char invitation[MAX_MSG_LEN];
+            snprintf(invitation, sizeof(invitation), "P2P_CONNECT:%s:%d",
+                     requester.ip, requester.p2p_port);
+            send(clients[i].socket, invitation, strlen(invitation), 0);
+
             pthread_mutex_unlock(&clients_mutex);
-            send_p2p_invitation(requester.name, requester.ip, requester.p2p_port, target_name);
-            pthread_mutex_lock(&clients_mutex);
-            break;
+            return;
         }
     }
-    
+
     if (!target_found) {
         char msg[MAX_MSG_LEN];
         snprintf(msg, sizeof(msg), "SERVER: User '%s' not found", target_name);
         send(client_sock, msg, strlen(msg), 0);
     }
-    
+
     pthread_mutex_unlock(&clients_mutex);
 }
 

@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Send acknowledgment to the peer
-        const char *ack_msg = "Connection accepted by server";
+        const char *ack_msg = "Connection accepted by P2P server";
         if (send(p2p_socket, ack_msg, strlen(ack_msg), 0) < 0) {
             add_message("Failed to send acknowledgment to peer");
             perror("send");
@@ -231,17 +231,9 @@ void add_message(const char *msg) {
 // Implement network functions
 int connect_to_peer(const char *ip, int port) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if(sockfd < 0) {
+    if (sockfd < 0) {
         add_message("Socket creation failed");
-        return -1;
-    }
-
-    // Set socket options
-    int opt = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, 
-                   &opt, sizeof(opt)) < 0) {
-        add_message("Socket options failed");
-        close(sockfd);
+        perror("socket");
         return -1;
     }
 
@@ -252,31 +244,35 @@ int connect_to_peer(const char *ip, int port) {
 
     if (inet_pton(AF_INET, ip, &peer_addr.sin_addr) <= 0) {
         add_message("Invalid peer IP address format");
+        perror("inet_pton");
         close(sockfd);
         return -1;
     }
 
     char msg[100];
-    snprintf(msg, sizeof(msg), "Connecting to %s:%d...", ip, port);
+    snprintf(msg, sizeof(msg), "Connecting to peer at %s:%d...", ip, port);
     add_message(msg);
 
     if (connect(sockfd, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) < 0) {
-        add_message("Connection failed");
+        add_message("Connection to peer failed");
         perror("connect");
         close(sockfd);
         return -1;
     }
 
+    add_message("Connected to peer successfully!");
+
     // Wait for acknowledgment from the server
     char ack_buffer[MAX_MSG] = {0};
     if (recv(sockfd, ack_buffer, sizeof(ack_buffer), 0) <= 0) {
-        add_message("Failed to receive acknowledgment from server");
+        add_message("Failed to receive acknowledgment from peer");
+        perror("recv");
         close(sockfd);
         return -1;
     }
 
     char ack_msg[100];
-    snprintf(ack_msg, sizeof(ack_msg), "Server acknowledgment: %s", ack_buffer);
+    snprintf(ack_msg, sizeof(ack_msg), "Peer acknowledgment: %s", ack_buffer);
     add_message(ack_msg);
 
     return sockfd;
