@@ -113,7 +113,7 @@ void launch_p2p_server() {
     if (pid == 0) {
         // Child process - launch in pure server mode
         execlp("x-terminal-emulator", "x-terminal-emulator", "-e", 
-              "./client_p2p.exe", "server", NULL);
+              "./client_p2p.exe", "server",username, NULL);
         exit(1);
     }
 }
