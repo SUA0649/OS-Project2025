@@ -31,12 +31,13 @@ typedef struct {
 void handle_p2p_request(int client_sock, const char* target_name);
 void send_p2p_invitation(const char* requester_name, const char* requester_ip, int requester_port, const char* target_name);
 
-// Queue for incoming connections
-typedef struct connection_queue {
-    int client_sock;
-    struct sockaddr_in client_addr;
-    STAILQ_ENTRY(connection_queue) entries;
-} connection_queue_t;
+// Queue for incoming connectionstypedef struct connection_queue {
+    typedef struct connection_queue {
+        int client_sock;
+        struct sockaddr_in client_addr;
+        char client_ip[INET_ADDRSTRLEN];  // Add this line
+        STAILQ_ENTRY(connection_queue) entries;
+    } connection_queue_t;
 
 // SIGINT handler
 void handle_sigint(int sig) {

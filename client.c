@@ -1,5 +1,6 @@
 #include "client.h"
 
+char LOCAL_IP[INET_ADDRSTRLEN];
 int current_socket = -1;
 int p2p_listener_port = -1;
 char p2p_response = 0;
@@ -103,6 +104,15 @@ void start_p2p_listener() {
     
     // Tell server our P2P port
     char port_msg[32];
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    
+    if (fd < 0) {
+        endwin();
+        fprintf(stderr, "Socket creation failed\n");
+        return;
+    }
+    
+    
     snprintf(port_msg, sizeof(port_msg), "P2P_PORT:%d", p2p_listener_port);
     send_to_current(port_msg);
     
@@ -258,7 +268,6 @@ void get_username() {
     }
 }
 
-
 int connect_to_server() {
     int sockfd;
     struct sockaddr_in serv_addr;
@@ -280,14 +289,17 @@ int connect_to_server() {
         return -1;
     }
     
-    // Send username to server
-    if(send(sockfd, username, strlen(username), 0) < 0) {
-    	close(sockfd);
+    // Send username and local IP to server in format "username:local_ip"
+    char init_msg[MAX_MSG];
+    snprintf(init_msg, sizeof(init_msg), "%s:%s", username, LOCAL_IP);
+    if(send(sockfd, init_msg, strlen(init_msg), 0) < 0) {
+        close(sockfd);
         return -1;
     }
-	
+    
     return sockfd;
 }
+
 
 int connect_to_peer(const char *ip, int port) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -506,7 +518,26 @@ int main() {
     get_username();
     // Get valid port
     init_ui();
+
+    struct sockaddr_in serv;
+    serv.sin_family = AF_INET;
+    serv.sin_addr.s_addr = inet_addr("8.8.8.8"); // Google DNS
+    serv.sin_port = htons(53); // DNS port
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0 || connect(fd, (struct sockaddr *)&serv, sizeof(serv))) {
+        close(fd);
+        endwin();
+        fprintf(stderr, "Connection failed\n");
+        return 1;
+    }
     
+    struct sockaddr_in name;
+    socklen_t namelen = sizeof(name);
+    getsockname(fd, (struct sockaddr *)&name, &namelen);
+    inet_ntop(AF_INET, &name.sin_addr, LOCAL_IP, INET_ADDRSTRLEN);
+    close(fd);
+
+
     current_socket = connect_to_server();
     if(current_socket < 0) {
         endwin();

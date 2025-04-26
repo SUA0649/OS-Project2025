@@ -167,26 +167,34 @@ void broadcast_user_list() {
     free(user_list);
     pthread_mutex_unlock(&clients_mutex);
 }
-
 void handle_client(int client_sock, struct sockaddr_in client_addr) { 
+    char temp_client_ip[INET_ADDRSTRLEN] = {0};
     char buffer[MAX_MSG_LEN] = {0};
-    char client_ip[INET_ADDRSTRLEN];
 
-    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, &client_addr.sin_addr, temp_client_ip, INET_ADDRSTRLEN);
     int client_port = ntohs(client_addr.sin_port);
 
-    // Get username
+    // Get username and local IP
     int bytes = recv(client_sock, buffer, MAX_MSG_LEN - 1, 0);
     if (bytes <= 0) {
         close(client_sock);
         return;
     }
-
+    
+    printf("%s\n",buffer);
+    // Parse username and local IP
+    char *username = strtok(buffer, ":");
+    char *local_ip = strtok(NULL, ":");
+    
+    if (!username || !local_ip) {
+        close(client_sock);
+        return;
+    }
 
     // Check if username exists
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < client_count; i++) {
-        if (strcmp(clients[i].name, buffer) == 0) {
+        if (strcmp(clients[i].name, username) == 0) {
             send(client_sock, "ERROR: Username taken", 21, 0);
             close(client_sock);
             pthread_mutex_unlock(&clients_mutex);
@@ -195,8 +203,8 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
     }
     pthread_mutex_unlock(&clients_mutex);
 
-    // Add client
-    add_client(buffer, client_ip, client_port, client_sock);
+    // Add client with their local IP
+    add_client(username, local_ip, client_port, client_sock);
     
     // Welcome message
     char welcome_msg[MAX_WELCOME_MSG];
@@ -390,7 +398,7 @@ int main() {
             perror("accept");
             continue;
         }
-
+    
         // Add to connection queue
         connection_queue_t *item = malloc(sizeof(connection_queue_t));
         if (item == NULL) {
@@ -400,12 +408,14 @@ int main() {
         
         item->client_sock = client_sock;
         memcpy(&item->client_addr, &client_addr, sizeof(client_addr));
+        inet_ntop(AF_INET, &client_addr.sin_addr, item->client_ip, INET_ADDRSTRLEN);
         
         pthread_mutex_lock(&queue_mutex);
         STAILQ_INSERT_TAIL(&connection_queue, item, entries);
         pthread_cond_signal(&queue_cond);
         pthread_mutex_unlock(&queue_mutex);
     }
+    
 
     // Cleanup
     server_running = false;
