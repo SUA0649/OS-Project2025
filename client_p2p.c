@@ -1,5 +1,15 @@
 #include "client.h"
 
+// Add at the top after includes
+typedef struct peer_list {
+    int socket;
+    char name[MAX_NAME_LEN];
+    struct peer_list *next;
+} PeerList;
+
+PeerList *peerss = NULL;
+pthread_mutex_t peers_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // Shared variables needed for P2P client
 UI ui;
 
@@ -8,31 +18,119 @@ void init_ui();
 void add_message(const char *msg);
 int connect_to_peer(const char *ip, int port);
 void* receive_messages(void *arg);
+void handle_p2p_client(int client_sock, struct sockaddr_in client_addr);
+void broadcast_message(const char *msg, int sender_sock);
+void add_peer(int sock, const char *name);
+void remove_peer(int sock);
+
+void handle_p2p_client(int client_sock, struct sockaddr_in client_addr) {
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+    
+    char msg[MAX_MSG];
+    snprintf(msg, sizeof(msg), "New peer connected from %s:%d", 
+             client_ip, ntohs(client_addr.sin_port));
+    add_message(msg);
+
+    // Add peer to list
+    add_peer(client_sock, "Anonymous");  // Can be enhanced with username exchange
+    
+    // Start a thread to handle this client
+    ThreadData *data = malloc(sizeof(ThreadData));
+    data->sockfd = client_sock;
+    data->ui = &ui;
+    
+    pthread_t recv_thread;
+    pthread_create(&recv_thread, NULL, receive_messages, data);
+    pthread_detach(recv_thread);
+}
+
+void broadcast_message(const char *msg, int sender_sock) {
+    pthread_mutex_lock(&peers_mutex);
+    PeerList *current = peerss;
+    while (current != NULL) {
+        if (current->socket != sender_sock) {
+            send(current->socket, msg, strlen(msg), 0);
+        }
+        current = current->next;
+    }
+    pthread_mutex_unlock(&peers_mutex);
+}
+
+void add_peer(int sock, const char *name) {
+    PeerList *new_peer = malloc(sizeof(PeerList));
+    new_peer->socket = sock;
+    strncpy(new_peer->name, name, MAX_NAME_LEN-1);
+    new_peer->next = NULL;
+
+    pthread_mutex_lock(&peers_mutex);
+    if (peerss == NULL) {
+        peerss = new_peer;
+    } else {
+        PeerList *current = peerss;
+        while (current->next != NULL) {
+            current = current->next;
+        }
+        current->next = new_peer;
+    }
+    pthread_mutex_unlock(&peers_mutex);
+}
+
+void remove_peer(int sock) {
+    pthread_mutex_lock(&peers_mutex);
+    PeerList *current = peerss;
+    PeerList *prev = NULL;
+
+    while (current != NULL) {
+        if (current->socket == sock) {
+            if (prev == NULL) {
+                peerss = current->next;
+            } else {
+                prev->next = current->next;
+            }
+            free(current);
+            break;
+        }
+        prev = current;
+        current = current->next;
+    }
+    pthread_mutex_unlock(&peers_mutex);
+}
 
 int main(int argc, char *argv[]) {
     
     if (argc == 5 && strcmp(argv[1], "server") == 0) {
-        // SERVER MODE - Full listener implementation
+        // SERVER MODE
         init_ui();
         strcpy(username, argv[2]);
         int p2p_port = atoi(argv[3]);
-        char temp[MAX_MSG];
-        snprintf(temp, sizeof(temp), "P2P Server Port: %s : Server IP: %s", argv[3], argv[4]);
-        add_message(temp);
-        add_message("P2P Server started. Waiting for connections...");
         
+        // Create listener socket
         int listener = socket(AF_INET, SOCK_STREAM, 0);
-        struct sockaddr_in addr;
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;  // Accept connections from any interface
-        addr.sin_port = htons(p2p_port);
+        if (listener < 0) {
+            add_message("Failed to create socket");
+            endwin();
+            return 1;
+        }
 
-        // Add socket options
+        // Set socket options for WSL
         int opt = 1;
-        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, 
+                       &opt, sizeof(opt)) < 0) {
+            add_message("Socket options failed");
+            endwin();
+            return 1;
+        }
+
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(p2p_port);
+        addr.sin_addr.s_addr = INADDR_ANY;  // Bind to all interfaces for WSL
 
         if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
             add_message("Bind failed - port may be in use");
+            perror("bind");
             endwin();
             return 1;
         }
@@ -43,26 +141,23 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        add_message("Waiting for peer connection...");
-        
-        // Accept connection
-        struct sockaddr_in peer_addr;
-        socklen_t addr_len = sizeof(peer_addr);
-        p2p_socket = accept(listener, (struct sockaddr*)&peer_addr, &addr_len);
-        close(listener);
-        
-        if (p2p_socket < 0) {
-            add_message("Accept failed!");
-            endwin();
-            return 1;
-        }
-        
-        char peer_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &peer_addr.sin_addr, peer_ip, INET_ADDRSTRLEN);
-        char msg[MAX_MSG];
-        snprintf(msg, sizeof(msg), "Connected to %s:%d", 
-                peer_ip, ntohs(peer_addr.sin_port));
+        char msg[100];
+        snprintf(msg, sizeof(msg), "P2P Server listening on port %d", p2p_port);
         add_message(msg);
+
+        // Accept connections in a loop
+        while (1) {
+            struct sockaddr_in peer_addr;
+            socklen_t addr_len = sizeof(peer_addr);
+            int client_sock = accept(listener, (struct sockaddr*)&peer_addr, &addr_len);
+            
+            if (client_sock < 0) {
+                add_message("Accept failed!");
+                continue;
+            }
+
+            handle_p2p_client(client_sock, peer_addr);
+        }
     }
 
     else if (argc >= 4 && strcmp(argv[1], "client") == 0) {
@@ -206,11 +301,17 @@ void* receive_messages(void *arg) {
         int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
         
         if(valread <= 0) {
-            add_message("Peer disconnected");
+            char msg[100];
+            snprintf(msg, sizeof(msg), "Peer disconnected");
+            add_message(msg);
+            remove_peer(data->sockfd);
+            close(data->sockfd);
+            free(data);
             break;
         }
         
         add_message(buffer);
+        broadcast_message(buffer, data->sockfd);
     }
     return NULL;
 }

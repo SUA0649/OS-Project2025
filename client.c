@@ -140,47 +140,20 @@ void launch_p2p_server() {
     
     pid_t pid = fork();
     if (pid == 0) {
-        // Child process - launch in pure server mode
+        // Child process
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", local_port);
         
-        // Create socket before exec
-        int server_sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (server_sock < 0) {
-            add_message("Failed to create server socket");
-            exit(1);
-        }
+        // Try xterm first (common in WSL)
+        execlp("xterm", "xterm", "-hold", "-e", 
+               "./client_p2p.exe", "server", username, port_str, "0.0.0.0", NULL);
         
-        // Set socket options
-        int opt = 1;
-        if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-            add_message("Failed to set socket options");
-            close(server_sock);
-            exit(1);
-        }
+        // If xterm fails, try gnome-terminal
+        execlp("gnome-terminal", "gnome-terminal", "--", 
+               "./client_p2p.exe", "server", username, port_str, "0.0.0.0", NULL);
         
-        struct sockaddr_in addr;
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(local_port);
-        
-        if (bind(server_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-            add_message("Failed to bind server socket");
-            close(server_sock);
-            exit(1);
-        }
-        
-        if (listen(server_sock, 5) < 0) {
-            add_message("Failed to listen on server socket");
-            close(server_sock);
-            exit(1);
-        }
-        
-        close(server_sock); // Close before exec
-        
-        execlp("x-terminal-emulator", "x-terminal-emulator",
-               "-bg", "black", "-fg", "white", "-e",  
-               "./client_p2p.exe", "server", username, port_str, LOCAL_IP, NULL);
+        // If all terminals fail, log error
+        add_message("Failed to launch terminal. Install xterm with: sudo apt install xterm");
         exit(1);
     }
 }
@@ -189,14 +162,21 @@ void launch_p2p_client(const char *peer_ip, int peer_port) {
     char msg[100];
     snprintf(msg, sizeof(msg), "Connecting to peer at %s:%d", peer_ip, peer_port);
     add_message(msg);
+    
     pid_t pid = fork();
     if (pid == 0) {
-        // Child process - launch in pure client mode
         char port_str[16];
-        snprintf(port_str, sizeof(port_str), "%d", peer_port);   
-        execlp("x-terminal-emulator", "x-terminal-emulator"
-              ,"-bg", "black", "-fg", "white", "-e", 
-              "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
+        snprintf(port_str, sizeof(port_str), "%d", peer_port);
+        
+        // Try xterm first
+        execlp("xterm", "xterm", "-hold", "-e",
+               "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
+        
+        // Try gnome-terminal as fallback
+        execlp("gnome-terminal", "gnome-terminal", "--",
+               "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
+        
+        add_message("Failed to launch terminal. Install xterm with: sudo apt install xterm");
         exit(1);
     }
 }
