@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
 
         // Debug message
         char debug_msg[100];
-        snprintf(debug_msg, sizeof(debug_msg), "Starting P2P server (WSL) with: IP=%s, Port=%d", 
+        snprintf(debug_msg, sizeof(debug_msg), "Starting P2P server with: IP=%s, Port=%d", 
                  server_ip, p2p_port);
         add_message(debug_msg);
 
@@ -33,9 +33,9 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        // Set socket options for WSL
+        // Set socket options
         int opt = 1;
-        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) < 0) {
             add_message("Socket options failed");
             perror("setsockopt");
             close(listener);
@@ -47,20 +47,18 @@ int main(int argc, char *argv[]) {
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
         addr.sin_port = htons(p2p_port);
-        addr.sin_addr.s_addr = INADDR_ANY; // Always bind to 0.0.0.0 for WSL portproxy
+        addr.sin_addr.s_addr = INADDR_ANY; // Bind to all interfaces
 
-        add_message("Attempting to bind to 0.0.0.0 (INADDR_ANY)...");
-
+        // Bind the socket
         if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            add_message("Bind failed on 0.0.0.0. Is the port already in use?");
+            add_message("Bind failed. Is the port already in use?");
             perror("bind");
             close(listener);
             endwin();
             return 1;
         }
 
-        add_message("Bind successful on 0.0.0.0!");
-
+        // Start listening
         if (listen(listener, 5) < 0) {
             add_message("Listen failed");
             perror("listen");
@@ -69,13 +67,8 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        // Get actual bound address
-        struct sockaddr_in bound_addr;
-        socklen_t bound_len = sizeof(bound_addr);
-        getsockname(listener, (struct sockaddr*)&bound_addr, &bound_len);
-        
-        snprintf(debug_msg, sizeof(debug_msg), "WSL P2P Server listening on port %d", 
-                 ntohs(bound_addr.sin_port));
+        // Log successful binding
+        snprintf(debug_msg, sizeof(debug_msg), "P2P Server listening on port %d", p2p_port);
         add_message(debug_msg);
         add_message("Waiting for peer connection...");
 
@@ -87,9 +80,22 @@ int main(int argc, char *argv[]) {
 
         if (p2p_socket < 0) {
             add_message("Accept failed!");
+            perror("accept");
             endwin();
             return 1;
         }
+
+        // Send acknowledgment to the peer
+        const char *ack_msg = "Connection accepted by server";
+        if (send(p2p_socket, ack_msg, strlen(ack_msg), 0) < 0) {
+            add_message("Failed to send acknowledgment to peer");
+            perror("send");
+            close(p2p_socket);
+            endwin();
+            return 1;
+        }
+
+        add_message("Acknowledgment sent to peer");
 
         // Log successful connection
         char peer_ip[INET_ADDRSTRLEN];
@@ -260,6 +266,18 @@ int connect_to_peer(const char *ip, int port) {
         close(sockfd);
         return -1;
     }
+
+    // Wait for acknowledgment from the server
+    char ack_buffer[MAX_MSG] = {0};
+    if (recv(sockfd, ack_buffer, sizeof(ack_buffer), 0) <= 0) {
+        add_message("Failed to receive acknowledgment from server");
+        close(sockfd);
+        return -1;
+    }
+
+    char ack_msg[100];
+    snprintf(ack_msg, sizeof(ack_msg), "Server acknowledgment: %s", ack_buffer);
+    add_message(ack_msg);
 
     return sockfd;
 }
