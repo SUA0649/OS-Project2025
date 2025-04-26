@@ -1,37 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <pthread.h>
-#include <stdbool.h>
-#include <sys/queue.h>
-
-#define MAX_CLIENTS 50
-#define MAX_NAME_LEN 32
-#define MAX_MSG_LEN 512
-#define PORT 8080
-#define MAX_WELCOME_MSG (MAX_MSG_LEN + MAX_NAME_LEN + 20)
-#define QUEUE_SIZE 10
-
-typedef struct {
-    char name[MAX_NAME_LEN];
-    char ip[INET_ADDRSTRLEN];
-    int port;
-    int socket;
-    int client_index;
-} ClientInfo;
-
-// Queue for incoming connections
-typedef struct connection_queue {
-    int client_sock;
-    struct sockaddr_in client_addr;
-    STAILQ_ENTRY(connection_queue) entries;
-} connection_queue_t;
-
-STAILQ_HEAD(queue_head, connection_queue);
+#include "server.h"
 
 struct queue_head connection_queue;
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -45,6 +12,69 @@ bool server_running = true;
 void broadcast_user_list();
 void remove_client(int index);
 void *thread_worker(void *arg);
+
+void handle_p2p_request(int client_sock, const char* target_name) {
+    pthread_mutex_lock(&clients_mutex);
+    //printf("Hello world\n");    
+    // Find requester info
+    ClientInfo requester = {0};
+    int requester_found = 0;
+    for (int i = 0; i < client_count; i++) {
+        if (clients[i].socket == client_sock) {
+            requester = clients[i];
+            requester_found = 1;
+            break;
+        }
+    }
+    
+    if (!requester_found) {
+        pthread_mutex_unlock(&clients_mutex);
+        return;
+    }
+    
+    // Find target client
+    int target_found = 0;
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp(clients[i].name, target_name) == 0) {
+            target_found = 1;
+            // Send invitation to target
+            pthread_mutex_unlock(&clients_mutex);
+            send_p2p_invitation(requester.name, requester.ip, requester.p2p_port, target_name);
+            pthread_mutex_lock(&clients_mutex);
+            break;
+        }
+    }
+    
+    if (!target_found) {
+        char msg[MAX_MSG_LEN];
+        snprintf(msg, sizeof(msg), "SERVER: User '%s' not found", target_name);
+        send(client_sock, msg, strlen(msg), 0);
+    }
+    
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void send_p2p_invitation(const char* requester_name, const char* requester_ip, 
+    int requester_port, const char* target_name) {
+    char invitation[MAX_MSG_LEN + MAX_NAME_LEN * 2 + 50];
+    snprintf(invitation, sizeof(invitation), 
+             "P2P_INVITE:%s:%s:%d", 
+             requester_name, requester_ip, requester_port);
+    
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp(clients[i].name, target_name) == 0) {
+            //printf("\n\n%s %s %d %s\n",requester_name, requester_ip, requester_port, target_name);
+            send(clients[i].socket, invitation, strlen(invitation), 0);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+
+
+
 
 void add_client(const char *name, const char *ip, int port, int socket) {
     pthread_mutex_lock(&clients_mutex);
@@ -130,9 +160,9 @@ void broadcast_user_list() {
     for (int i = 0; i < client_count; i++) {
         send(clients[i].socket, user_list, strlen(user_list) + 1, 0);
     }
-    fflush(stdout);
-    printf("%s   ",user_list);
-    fflush(stdout);
+    //fflush(stdout);
+    //printf("%s   ",user_list);
+    //fflush(stdout);
     
     free(user_list);
     pthread_mutex_unlock(&clients_mutex);
@@ -184,11 +214,32 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
     while (1) {
         memset(buffer, 0, sizeof(buffer));
         bytes = recv(client_sock, buffer, MAX_MSG_LEN - 1, 0);
-        
+        //printf("%s\n",buffer);
         if (bytes <= 0) break;
 
         if (strcmp(buffer, "/quit") == 0){
             break;
+        }
+         else if (strncmp(buffer, "/connect ", 9) == 0) {
+            // Handle P2P connection request
+            char* target_name = buffer + 9;
+            handle_p2p_request(client_sock, target_name);
+            continue;
+        }
+       
+        else if (strncmp(buffer, "P2P_PORT:", 9) == 0) {
+            // Client is telling us their P2P listening port
+            int p2p_port = atoi(buffer + 9);
+            pthread_mutex_lock(&clients_mutex);
+            for (int i = 0; i < client_count; i++) {
+                if (clients[i].socket == client_sock) {
+                    printf("\n\np2p_port: %d\n", p2p_port);
+                    clients[i].p2p_port = p2p_port;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&clients_mutex);
+            continue;
         }
         
         // Broadcast message with correct sender info

@@ -1,74 +1,90 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ncurses.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <pthread.h>
-#include <stdbool.h>
+#include "client.h"
 
-#define SERVER_IP "127.0.0.1"
-#define SERVER_PORT 8080
-#define MAX_NAME_LEN 32
-#define MAX_MSG 512
-#define MAX_USERS 50
-#define USER_LIST_WIDTH 30
-
-typedef enum {
-    CONN_SERVER,
-    CONN_P2P
-} ConnectionType;
-
-typedef struct {
-    char name[MAX_MSG];
-    char ip[INET_ADDRSTRLEN];
-    int port;
-    int socket;
-} PeerInfo;
-
-typedef struct {
-    WINDOW *chat_win;
-    WINDOW *users_win;
-    WINDOW *input_win;
-} UI;
-
-typedef struct {
-    int sockfd;
-    UI *ui;
-} ThreadData;
-
-UI ui;
-PeerInfo peers[MAX_USERS];
-int peer_count = 0;
-char username[MAX_MSG] = {0};
-ConnectionType current_conn_type = CONN_SERVER;
 int current_socket = -1;
-int p2p_socket = -1;
-int p2p_listener = -1;
+int p2p_listener_port = -1;
+char p2p_response = 0;
+
+int find_available_p2p_port() {
+    for (int port = P2P_PORT_START; port <= P2P_PORT_END; port++) {
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) continue;
+        
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(port);
+        
+    
+        if (bind(sock, (struct sockaddr *)&addr, sizeof(addr))) {
+            close(sock);
+            continue;
+        }
+        
+        close(sock);
+        return port;
+    }
+    return -1;
+}
+
+void start_p2p_listener() {
+    p2p_listener_port = find_available_p2p_port();
+    if (p2p_listener_port == -1) {
+        add_message("Failed to find available P2P port");
+        return;
+    }
+    
+    // Tell server our P2P port
+    char port_msg[32];
+    snprintf(port_msg, sizeof(port_msg), "P2P_PORT:%d", p2p_listener_port);
+    send_to_current(port_msg);
+    
+}
+
+void launch_p2p_server() {
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process - launch in pure server mode
+        execlp("x-terminal-emulator", "x-terminal-emulator", "-e", 
+              "./client_p2p.exe", "server", NULL);
+        exit(1);
+    }
+}
+
+void launch_p2p_client(const char *peer_ip, int peer_port) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process - launch in pure client mode
+        char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%d", peer_port);   
+        execlp("x-terminal-emulator", "x-terminal-emulator", "-e",
+              "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
+        exit(1);
+    }
+}
 
 void init_ui() {
-    initscr();
-    cbreak();
-    noecho();
-    keypad(stdscr, TRUE);
-    refresh();
-
-    ui.chat_win = newwin(LINES-3, COLS-USER_LIST_WIDTH-1, 0, 0);
-    scrollok(ui.chat_win, TRUE);
-    box(ui.chat_win, 0, 0);
-    mvwprintw(ui.chat_win, 0, 2, " Chat ");
-    wrefresh(ui.chat_win);
-
-    ui.users_win = newwin(LINES-3, USER_LIST_WIDTH, 0, COLS-USER_LIST_WIDTH);
-    box(ui.users_win, 0, 0);
-    mvwprintw(ui.users_win, 0, 2, " Online Users ");
-    wrefresh(ui.users_win);
-
-    ui.input_win = newwin(3, COLS-USER_LIST_WIDTH-1, LINES-3, 0);
-    mvwprintw(ui.input_win, 1, 0, "> ");
-    wrefresh(ui.input_win);
+        initscr();
+        cbreak();
+        noecho();
+        keypad(stdscr, TRUE);
+        refresh();
+    
+        ui.chat_win = newwin(LINES-3, COLS-USER_LIST_WIDTH-1, 0, 0);
+        scrollok(ui.chat_win, TRUE);
+        box(ui.chat_win, 0, 0);
+        mvwprintw(ui.chat_win, 0, 2, " Chat ");
+        ui.chat_line = 1;  // Initialize at line 1 (inside the box)
+        wrefresh(ui.chat_win);
+    
+        ui.users_win = newwin(LINES-3, USER_LIST_WIDTH, 0, COLS-USER_LIST_WIDTH);
+        box(ui.users_win, 0, 0);
+        mvwprintw(ui.users_win, 0, 2, " Online Users ");
+        wrefresh(ui.users_win);
+    
+        ui.input_win = newwin(3, COLS-USER_LIST_WIDTH-1, LINES-3, 0);
+        mvwprintw(ui.input_win, 1, 0, "> ");
+        wrefresh(ui.input_win);
+    
 }
 
 void update_user_list() {
@@ -100,18 +116,57 @@ void update_user_list() {
     // Debug: print current window content
 }
 
-
 void add_message(const char *msg) {
-    static int line = 1;
     int maxy, maxx;
     getmaxyx(ui.chat_win, maxy, maxx);
+    int available_height = maxy - 2;
+    int available_width = maxx - 2;
     
-    if(line >= maxy-1) {
-        scroll(ui.chat_win);
-        line = maxy-2;
+    if (available_height <= 0) return;
+
+    char buffer[MAX_MSG];
+    strncpy(buffer, msg, MAX_MSG-1);
+    buffer[MAX_MSG-1] = '\0';
+
+    char *line = buffer;
+    while (*line) {
+        // Handle scrolling if needed
+        if (ui.chat_line >= available_height) {
+            for (int i = 1; i < available_height; i++) {
+                char line_content[available_width + 1];
+                mvwinstr(ui.chat_win, i + 1, 1, line_content);
+                mvwprintw(ui.chat_win, i, 1, "%-*s", available_width, line_content);
+            }
+            wmove(ui.chat_win, available_height - 1, 1);
+            wclrtoeol(ui.chat_win);
+            ui.chat_line = available_height - 1;
+        }
+
+        // Word wrapping logic
+        int remaining = available_width;
+        if (strlen(line) > remaining) {
+            // Find last space within width limit
+            int cut = remaining;
+            while (cut > 0 && line[cut] != ' ' && line[cut] != '\0') {
+                cut--;
+            }
+            if (cut == 0) cut = remaining; // No spaces found
+            
+            char saved = line[cut];
+            line[cut] = '\0';
+            mvwprintw(ui.chat_win, ui.chat_line, 1, "%s", line);
+            line[cut] = saved;
+            line += cut + (saved == ' ' ? 1 : 0);
+            ui.chat_line++;
+        } else {
+            mvwprintw(ui.chat_win, ui.chat_line, 1, "%s", line);
+            ui.chat_line++;
+            break;
+        }
     }
-    
-    mvwprintw(ui.chat_win, line++, 1, "%s", msg);
+
+    box(ui.chat_win, 0, 0);
+    mvwprintw(ui.chat_win, 0, 2, " Chat ");
     wrefresh(ui.chat_win);
 }
 
@@ -189,8 +244,7 @@ void* receive_messages(void *arg) {
     
     while(1) {
         memset(buffer, 0, sizeof(buffer));
-
-		int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
+        int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
         
         if(valread <= 0) {
             add_message("Disconnected from server");
@@ -201,88 +255,84 @@ void* receive_messages(void *arg) {
             break;
         }
 
-		if (strncmp(buffer, "USERS:", 6) == 0) {
-			// Debug: print the raw user list
-            printf("\t %s    ",buffer);
-			// Clear existing peers
-			peer_count = 0;
-		
-			// Make a copy for safe tokenization
-			char list_copy[MAX_MSG];
-			strncpy(list_copy, buffer + 6, MAX_MSG - 1);
-			list_copy[MAX_MSG - 1] = '\0';
-            printf("%s  ",buffer);
+        // Handle user list updates
+        else if (strncmp(buffer, "USERS:", 6) == 0) {
+            peer_count = 0;
+            char list_copy[MAX_MSG];
+            strncpy(list_copy, buffer + 6, MAX_MSG - 1);
+            list_copy[MAX_MSG - 1] = '\0';
 
-			// Tokenize and parse each user entry: "name:ip:port"
-			char *token = strtok(list_copy, ",");
-			while (token && peer_count < MAX_USERS) {
-				char name[MAX_NAME_LEN];
-				char ip[INET_ADDRSTRLEN];
-				int port;
-		
-				if (sscanf(token, "%[^:]:%[^:]:%d", name, ip, &port) == 3) {
-					strncpy(peers[peer_count].name, name, MAX_NAME_LEN - 1);
-					peers[peer_count].name[MAX_NAME_LEN - 1] = '\0';
-		
-					strncpy(peers[peer_count].ip, ip, INET_ADDRSTRLEN - 1);
-					peers[peer_count].ip[INET_ADDRSTRLEN - 1] = '\0';
-		
-					peers[peer_count].port = port;
-					peers[peer_count].socket = -1;
-		
-					peer_count++;
-				}
-		
-				token = strtok(NULL, ",");
-			}
-		
-			// Refresh the user interface
-			update_user_list();
-		}
-        else if(strncmp(buffer, "P2P:", 4) == 0) {
-            // Server is giving us P2P connection info
-            char *ip = strtok(buffer+4, ":");
-            char *port_str = strtok(NULL, ":");
-            
-            if(ip && port_str) {
-                int port = atoi(port_str);
-                p2p_socket = connect_to_peer(ip, port);
-                if(p2p_socket >= 0) {
-                    current_conn_type = CONN_P2P;
-                    current_socket = p2p_socket;
-                    add_message("P2P connection established!");
-                } else {
-                    add_message("P2P connection failed");
+            char *token = strtok(list_copy, ",");
+            while (token && peer_count < MAX_USERS) {
+                char name[MAX_NAME_LEN];
+                char ip[INET_ADDRSTRLEN];
+                int port;
+        
+                if (sscanf(token, "%[^:]:%[^:]:%d", name, ip, &port) == 3) {
+                    strncpy(peers[peer_count].name, name, MAX_NAME_LEN - 1);
+                    strncpy(peers[peer_count].ip, ip, INET_ADDRSTRLEN - 1);
+                    peers[peer_count].port = port;
+                    peers[peer_count].socket = -1;
+                    peer_count++;
                 }
+                token = strtok(NULL, ",");
             }
+            update_user_list();
+            continue;
         }
-        else if(strncmp(buffer, "P2P_REQUEST:", 12) == 0) {
-            // Another client wants to connect to us
+        // Handle P2P invitations
+        else if (strncmp(buffer, "P2P_INVITE:", 11) == 0) {
+            char *inviter_name = strtok(buffer+11, ":");
+            char *inviter_ip = strtok(NULL, ":");
+            char *inviter_port_str = strtok(NULL, ":");
+            
+            if (inviter_name && inviter_ip && inviter_port_str) {
+                int inviter_port = atoi(inviter_port_str);
+                
+                pthread_mutex_lock(&input_mutex);
+                input_mode = INPUT_P2P_PROMPT;
+                add_message("P2P invitation received. Accept? (y/n): ");
+                wrefresh(ui.chat_win);
+                
+                while (input_mode == INPUT_P2P_PROMPT) {
+                    pthread_cond_wait(&input_cond, &input_mutex);
+                }
+                
+                if (p2p_response == 'y' || p2p_response == 'Y') {
+                    add_message("Launching Client");
+                    launch_p2p_client(inviter_ip, inviter_port);
+                }
+                pthread_mutex_unlock(&input_mutex);
+            }
+            continue;
+        }
+        // Handle P2P connection requests
+        else if (strncmp(buffer, "P2P_CONNECT:", 12) == 0) {
             char *ip = strtok(buffer+12, ":");
             char *port_str = strtok(NULL, ":");
             
             if(ip && port_str) {
-                char msg[MAX_MSG];
-                snprintf(msg, sizeof(msg), "P2P connection request from %s. Accept? (y/n): ", ip);
-                add_message(msg);
+                int port = atoi(port_str);
+                add_message("launching p2p server");
+                launch_p2p_server();  // Become server first
+                sleep(1);  // Give server time to start
+                current_socket = connect_to_peer(ip, port);  // Then connect as client
                 
-                int ch = getch();
-                if(ch == 'y' || ch == 'Y') {
-                    int port = atoi(port_str);
-                    p2p_socket = connect_to_peer(ip, port);
-                    if(p2p_socket >= 0) {
-                        current_conn_type = CONN_P2P;
-                        current_socket = p2p_socket;
-                        add_message("P2P connection established!");
-                    } else {
-                        add_message("P2P connection failed");
-                    }
+                if(current_socket >= 0) {
+                    add_message("P2P connection established!");
+                    current_conn_type = CONN_P2P;
+                } else {
+                    add_message("P2P connection failed");
                 }
             }
+            continue;
         }
-        else {
-            add_message(buffer);
+        else{
+                // Handle regular messages
+                add_message(buffer);
+    
         }
+
     }
     return NULL;
 }
@@ -303,44 +353,47 @@ void chat_loop() {
         pthread_create(&recv_thread, NULL, receive_messages, &data);
     }
     
+    start_p2p_listener();
+
     while(1) {
         ch = getch();
         
-        if(ch == '`') {
-            if(current_conn_type == CONN_SERVER) {
+        pthread_mutex_lock(&input_mutex);
+        if (input_mode == INPUT_P2P_PROMPT) {
+            // Only accept 'y' or 'n' in this mode
+            if (ch == 'y' || ch == 'Y' || ch == 'n' || ch == 'N') {
+                p2p_response = ch;
+                input_mode = INPUT_NORMAL;
+                pthread_cond_signal(&input_cond);
+            }
+            pthread_mutex_unlock(&input_mutex);
+            continue;
+        }
+        pthread_mutex_unlock(&input_mutex);
+        
+        // Ignore special keys (keypad keys) except backspace and enter
+        if (ch >= KEY_MIN) {  // KEY_MIN is the minimum value for special keys
+            if (ch != KEY_BACKSPACE && ch != '\n') {
+                continue;  // Skip all other special keys
+            }
+        }
+        
+        if (ch == '`') {
+            if (current_conn_type == CONN_SERVER) {
                 send_to_current("/quit");
                 break;
             }
             
-        // Close all sockets
-        if(p2p_socket != -1) {
-            close(p2p_socket);
-            p2p_socket = -1;
-        }
-        if(current_socket != -1) {
-            close(current_socket);
-            current_socket = -1;
-        }
+            if (current_socket != -1) {
+                close(current_socket);
+                current_socket = -1;
+            }
             break;
         }
-        else if(ch == '\n' && pos > 0) {
-            if(strncmp(input, "/connect ", 9) == 0) {
-                char *target = input + 9;
-                if(strcasecmp(target, "server") == 0 && current_conn_type == CONN_P2P) {
-                    // Switch back to server connection
-                    close(p2p_socket);
-                    p2p_socket = -1;
-                    current_conn_type = CONN_SERVER;
-                    current_socket = connect_to_server();
-                    if(current_socket >= 0) {
-                        pthread_create(&recv_thread, NULL, receive_messages, &data);
-                        add_message("Switched back to server connection");
-                    }
-                }
-                else {
-                    // Request P2P connection
-                    send_to_current(input);
-                }
+        else if (ch == '\n' && pos > 0) {
+            if (strncmp(input, "/connect ", 9) == 0) {                
+                launch_p2p_server();
+                send_to_current(input);
             }
             else {
                 send_to_current(input);
@@ -353,40 +406,34 @@ void chat_loop() {
             mvwprintw(ui.input_win, 1, 0, "> ");
             wrefresh(ui.input_win);
         }
-        else if((ch == 127 || ch == KEY_BACKSPACE) && pos > 0) {
+        else if ((ch == 127 || ch == KEY_BACKSPACE) && pos > 0) {
             input[--pos] = '\0';
             mvwprintw(ui.input_win, 1, 2+pos, " ");
             wmove(ui.input_win, 1, 2+pos);
             wrefresh(ui.input_win);
         }
-        else if(ch != ERR && pos < MAX_MSG-1) {
+        else if (isprint(ch) && pos < MAX_MSG-1) {  // Only accept printable characters
             input[pos++] = ch;
             wprintw(ui.input_win, "%c", ch);
             wrefresh(ui.input_win);
         }
     }
-
-    int disc = recv(current_socket, NULL, 0, 0);
-    if(disc <= 0) {
-        add_message("Disconnected from server");
-    } else {
-        add_message("Server closed connection");
-    }
-    pthread_cancel(recv_thread);
-    pthread_join(recv_thread, NULL);
-    if (p2p_socket != -1) {
-        close(p2p_socket);
-        p2p_socket = -1;
-    }
-    if (current_socket != -1) {
-        close(current_socket);
-        current_socket = -1;
-    }
     
 }
 
+void handle_sigint(int sig) {
+    
+    if (current_socket != -1) {
+        send_to_current("/quit");
+    }
+    endwin();
+    exit(0);
+}
+
 int main() {
+    signal(SIGINT,handle_sigint);
     get_username();
+    // Get valid port
     init_ui();
     
     current_socket = connect_to_server();
