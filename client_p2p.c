@@ -18,9 +18,9 @@ int main(int argc, char *argv[]) {
         int p2p_port = atoi(argv[3]);
         char *server_ip = argv[4];
 
-        // Debug message to verify parameters
+        // Debug message
         char debug_msg[100];
-        snprintf(debug_msg, sizeof(debug_msg), "Starting server with: IP=%s, Port=%d", 
+        snprintf(debug_msg, sizeof(debug_msg), "Starting P2P server (WSL) with: IP=%s, Port=%d", 
                  server_ip, p2p_port);
         add_message(debug_msg);
 
@@ -33,10 +33,9 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        // Set socket options - IMPORTANT: Only use SO_REUSEADDR
+        // Set socket options for WSL
         int opt = 1;
-        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, 
-                       &opt, sizeof(opt)) < 0) {
+        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
             add_message("Socket options failed");
             perror("setsockopt");
             close(listener);
@@ -49,32 +48,20 @@ int main(int argc, char *argv[]) {
         addr.sin_family = AF_INET;
         addr.sin_port = htons(p2p_port);
         
-        // Try INADDR_ANY first to see if it works
+        // In WSL, bind to 0.0.0.0 to accept connections through port proxy
         addr.sin_addr.s_addr = INADDR_ANY;
 
+        // Single bind attempt for WSL
         if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            add_message("First bind attempt failed, trying specific IP...");
-            perror("bind1");
-            
-            // Try with specific IP
-            if (inet_pton(AF_INET, server_ip, &addr.sin_addr) <= 0) {
-                add_message("Invalid IP address format");
-                perror("inet_pton");
-                close(listener);
-                endwin();
-                return 1;
-            }
-
-            if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-                char error_msg[100];
-                snprintf(error_msg, sizeof(error_msg), "Bind failed on %s:%d", 
-                         server_ip, p2p_port);
-                add_message(error_msg);
-                perror("bind2");
-                close(listener);
-                endwin();
-                return 1;
-            }
+            char error_msg[100];
+            snprintf(error_msg, sizeof(error_msg), "WSL bind failed on port %d", p2p_port);
+            add_message(error_msg);
+            add_message("Check if port proxy is properly configured:");
+            add_message("netsh interface portproxy show v4tov4");
+            perror("bind");
+            close(listener);
+            endwin();
+            return 1;
         }
 
         if (listen(listener, 5) < 0) {
@@ -85,15 +72,13 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        // Success message with bound address
+        // Get actual bound address
         struct sockaddr_in bound_addr;
         socklen_t bound_len = sizeof(bound_addr);
         getsockname(listener, (struct sockaddr*)&bound_addr, &bound_len);
-        char bound_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &bound_addr.sin_addr, bound_ip, INET_ADDRSTRLEN);
         
-        snprintf(debug_msg, sizeof(debug_msg), "Server bound to %s:%d", 
-                 bound_ip, ntohs(bound_addr.sin_port));
+        snprintf(debug_msg, sizeof(debug_msg), "WSL P2P Server listening on port %d", 
+                 ntohs(bound_addr.sin_port));
         add_message(debug_msg);
         add_message("Waiting for peer connection...");
 
