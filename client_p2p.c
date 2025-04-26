@@ -18,19 +18,27 @@ int main(int argc, char *argv[]) {
         int p2p_port = atoi(argv[3]);
         char *server_ip = argv[4];
 
-        // Create single listener socket
+        // Debug message to verify parameters
+        char debug_msg[100];
+        snprintf(debug_msg, sizeof(debug_msg), "Starting server with: IP=%s, Port=%d", 
+                 server_ip, p2p_port);
+        add_message(debug_msg);
+
+        // Create listener socket
         int listener = socket(AF_INET, SOCK_STREAM, 0);
         if (listener < 0) {
             add_message("Failed to create socket");
+            perror("socket");
             endwin();
             return 1;
         }
 
-        // Set socket options
+        // Set socket options - IMPORTANT: Only use SO_REUSEADDR
         int opt = 1;
-        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, 
+        if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, 
                        &opt, sizeof(opt)) < 0) {
             add_message("Socket options failed");
+            perror("setsockopt");
             close(listener);
             endwin();
             return 1;
@@ -41,34 +49,52 @@ int main(int argc, char *argv[]) {
         addr.sin_family = AF_INET;
         addr.sin_port = htons(p2p_port);
         
-        // Bind to specific IP instead of INADDR_ANY
-        if (inet_pton(AF_INET, server_ip, &addr.sin_addr) <= 0) {
-            add_message("Invalid IP address");
-            close(listener);
-            endwin();
-            return 1;
-        }
+        // Try INADDR_ANY first to see if it works
+        addr.sin_addr.s_addr = INADDR_ANY;
 
         if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            char error_msg[100];
-            snprintf(error_msg, sizeof(error_msg), "Bind failed on %s:%d", server_ip, p2p_port);
-            add_message(error_msg);
-            perror("bind");
-            close(listener);
-            endwin();
-            return 1;
+            add_message("First bind attempt failed, trying specific IP...");
+            perror("bind1");
+            
+            // Try with specific IP
+            if (inet_pton(AF_INET, server_ip, &addr.sin_addr) <= 0) {
+                add_message("Invalid IP address format");
+                perror("inet_pton");
+                close(listener);
+                endwin();
+                return 1;
+            }
+
+            if (bind(listener, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+                char error_msg[100];
+                snprintf(error_msg, sizeof(error_msg), "Bind failed on %s:%d", 
+                         server_ip, p2p_port);
+                add_message(error_msg);
+                perror("bind2");
+                close(listener);
+                endwin();
+                return 1;
+            }
         }
 
         if (listen(listener, 5) < 0) {
             add_message("Listen failed");
+            perror("listen");
             close(listener);
             endwin();
             return 1;
         }
 
-        char msg[100];
-        snprintf(msg, sizeof(msg), "P2P Server started on %s:%d", server_ip, p2p_port);
-        add_message(msg);
+        // Success message with bound address
+        struct sockaddr_in bound_addr;
+        socklen_t bound_len = sizeof(bound_addr);
+        getsockname(listener, (struct sockaddr*)&bound_addr, &bound_len);
+        char bound_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &bound_addr.sin_addr, bound_ip, INET_ADDRSTRLEN);
+        
+        snprintf(debug_msg, sizeof(debug_msg), "Server bound to %s:%d", 
+                 bound_ip, ntohs(bound_addr.sin_port));
+        add_message(debug_msg);
         add_message("Waiting for peer connection...");
 
         // Accept connection
@@ -86,6 +112,7 @@ int main(int argc, char *argv[]) {
         // Log successful connection
         char peer_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &peer_addr.sin_addr, peer_ip, INET_ADDRSTRLEN);
+        char msg[100];
         snprintf(msg, sizeof(msg), "Connected to peer at %s:%d", 
                  peer_ip, ntohs(peer_addr.sin_port));
         add_message(msg);
