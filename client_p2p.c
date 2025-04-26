@@ -2,7 +2,7 @@
 
 // Shared variables needed for P2P client
 UI ui;
-
+char current_username[MAX_MSG] = {0};
 
 // Forward declarations different from client.c
 void init_ui();
@@ -12,11 +12,11 @@ void* receive_messages(void *arg);
 
 int main(int argc, char *argv[]) {
     
-    if (argc == 2 && strcmp(argv[1], "server") == 0) {
+    if (argc == 3 && strcmp(argv[1], "server") == 0) {
         // SERVER MODE - Full listener implementation
+        strcpy(current_username, argv[2]);
         init_ui();
         add_message("P2P Server started. Waiting for connections...");
-        
         int listener = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in addr = {
             .sin_family = AF_INET,
@@ -58,6 +58,7 @@ int main(int argc, char *argv[]) {
 
     else if (argc >= 4 && strcmp(argv[1], "client") == 0) {
         // CLIENT MODE - Connect to existing server
+        strcpy(current_username, argv[2]);
         char *peer_ip = argv[3];
         int peer_port = atoi(argv[4]);
         
@@ -96,7 +97,10 @@ int main(int argc, char *argv[]) {
             break;
         }
         else if(ch == '\n' && pos > 0) {
-            send(p2p_socket, input, strlen(input), 0);
+            char formatted_msg[MAX_MSG + MAX_NAME_LEN + 2];
+            snprintf(formatted_msg, sizeof(formatted_msg), "%s: %s", current_username, input);
+            send(p2p_socket, formatted_msg, strlen(formatted_msg), 0);
+            add_message(formatted_msg);
             pos = 0;
             memset(input, 0, sizeof(input));
             wmove(ui.input_win, 1, 2);
@@ -161,10 +165,7 @@ void add_message(const char *msg) {
     char timestamp[9];
     strftime(timestamp, sizeof(timestamp), "%H:%M:%S", t);
     
-    char formatted_msg[MAX_MSG + 20];
-    snprintf(formatted_msg, sizeof(formatted_msg), "[%s] %s", timestamp, msg);
-    
-    mvwprintw(ui.chat_win, line++, 1, "%-*.*s", maxx-2, maxx-2, formatted_msg);
+    mvwprintw(ui.chat_win, line++, 1, "%-*.*s", maxx-2, maxx-2, msg);
     wrefresh(ui.chat_win);
 }
 

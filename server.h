@@ -8,7 +8,11 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <sys/queue.h>
+#include <fcntl.h>
+#include <signal.h>
 
+
+#define LOCK_FILE "/tmp/server.lock"
 #define MAX_CLIENTS 50
 #define MAX_NAME_LEN 32
 #define MAX_MSG_LEN 512
@@ -16,6 +20,7 @@
 #define MAX_WELCOME_MSG (MAX_MSG_LEN + MAX_NAME_LEN + 20)
 #define QUEUE_SIZE 10
 
+int server_fd = -1;
 typedef struct {
     char name[MAX_NAME_LEN];
     char ip[INET_ADDRSTRLEN];
@@ -34,5 +39,17 @@ typedef struct connection_queue {
     struct sockaddr_in client_addr;
     STAILQ_ENTRY(connection_queue) entries;
 } connection_queue_t;
+
+// SIGINT handler
+void handle_sigint(int sig) {
+    printf("\n🔴 Received SIGINT (Ctrl+C)\n");
+    execlp("rm","rm", "-f","/tmp/server.lock",NULL);
+    //unlink(LOCK_FILE);
+    if (server_fd >= 0) {
+                close(server_fd);
+                printf("🚪 Server socket closed\n");
+            }
+    exit(0);
+}
 
 STAILQ_HEAD(queue_head, connection_queue);

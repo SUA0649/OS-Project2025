@@ -8,9 +8,11 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <signal.h>
+#include "Utils/cJSON.h"
 #include <stdbool.h>
 #include <ctype.h>
 
+#define MAX_FILEPATH 300
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 8080
 #define MAX_NAME_LEN 32
@@ -20,6 +22,33 @@
 #define P2P_PORT_START 9000
 #define P2P_PORT_END 9100
 
+
+char* read_file(const char *filename){
+    FILE *fp = fopen(filename, "r");
+    if (!fp) return NULL;
+
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    rewind(fp);
+
+    char *data = (char *)malloc(size + 1);
+    fread(data, 1, size, fp);
+    data[size] = '\0';
+    fclose(fp);
+    return data;
+}
+
+void write_file(const char *filename, cJSON *json) {
+    char *json_str = cJSON_Print(json);
+    FILE *fp = fopen(filename, "w");
+    if (!fp) {
+        printf("❌ Failed to write file.\n");
+        return;
+    }
+    fprintf(fp, "%s", json_str);
+    fclose(fp);
+    free(json_str);
+}
 
 typedef enum {
     INPUT_NORMAL,

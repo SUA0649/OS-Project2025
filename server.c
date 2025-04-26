@@ -330,10 +330,22 @@ void *thread_worker(void *arg) {
 }
 
 int main() {
-    int server_fd;
+    signal(SIGINT,handle_sigint);
     struct sockaddr_in address;
     int opt = 1;
     pthread_t worker_threads[MAX_CLIENTS];
+    
+    if(access(LOCK_FILE,F_OK)==0){
+        printf("Another instance of a server is running on the local network.");
+        exit(1);
+    }
+
+    int fd= open(LOCK_FILE,O_CREAT | O_RDWR,0666);
+    if(fd<0){
+        perror("Lock file creation failed");
+        exit(1);
+    }
+
 
     // Initialize connection queue
     STAILQ_INIT(&connection_queue);

@@ -4,6 +4,74 @@ int current_socket = -1;
 int p2p_listener_port = -1;
 char p2p_response = 0;
 
+
+void display_previous_chat(){
+    char file[MAX_FILEPATH];
+    snprintf(file,MAX_FILEPATH,"Logs/%s.json",username);
+    char *json_data = read_file(file);
+
+    cJSON *root=NULL;
+
+    if(!json_data){
+        root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root,"username",username);
+        cJSON_AddItemToObject(root,"messages",cJSON_CreateArray()); 
+        return;
+    }
+    else{
+        root = cJSON_Parse(json_data);
+        free(json_data);
+        if(!root){
+            fprintf(stderr,"Failed to parse chat log.");
+            return ;
+        }
+        cJSON *messages = cJSON_GetObjectItem(root,"messages");
+        if(!cJSON_IsArray(messages)){
+            fprintf(stderr,"Wrong format stored in the JSON file.");
+            cJSON_Delete(root);
+            return ;
+        }
+        cJSON *msg=NULL;
+        cJSON_ArrayForEach(msg,messages){
+            if(cJSON_IsString){
+                add_message(msg->valuestring);
+            }
+        }
+    }
+    cJSON_Delete(root);
+}
+    
+void update_log(const char *message) {
+    char file[MAX_FILEPATH];
+    snprintf(file,MAX_FILEPATH,"Logs/%s.json", username);
+
+    char *json_data = read_file(file);
+    cJSON *root = NULL;
+
+    if (json_data) {
+        root = cJSON_Parse(json_data);
+        free(json_data);
+    }
+
+    if (!root) {
+        root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "username", username);
+        cJSON_AddItemToObject(root, "messages", cJSON_CreateArray());
+    }
+
+    cJSON *messages = cJSON_GetObjectItem(root, "messages");
+    if (!cJSON_IsArray(messages)) {
+        messages = cJSON_CreateArray();
+        cJSON_ReplaceItemInObject(root, "messages", messages);
+    }
+    cJSON_AddItemToArray(messages, cJSON_CreateString(message));
+
+    // Save back to file
+    write_file(file, root);
+    cJSON_Delete(root);
+}
+
+
 int find_available_p2p_port() {
     for (int port = P2P_PORT_START; port <= P2P_PORT_END; port++) {
         int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -45,7 +113,7 @@ void launch_p2p_server() {
     if (pid == 0) {
         // Child process - launch in pure server mode
         execlp("x-terminal-emulator", "x-terminal-emulator", "-e", 
-              "./client_p2p.exe", "server", NULL);
+              "./client_p2p.exe", "server",username, NULL);
         exit(1);
     }
 }
@@ -242,6 +310,8 @@ void* receive_messages(void *arg) {
     ThreadData *data = (ThreadData *)arg;
     char buffer[MAX_MSG];
     
+    display_previous_chat();
+
     while(1) {
         memset(buffer, 0, sizeof(buffer));
         int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
@@ -329,6 +399,7 @@ void* receive_messages(void *arg) {
         }
         else if(strncmp(buffer,"charUSERS",9) != 0){
                 // Handle regular messages
+                update_log(buffer);
                 add_message(buffer);
     
         }
