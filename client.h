@@ -310,6 +310,40 @@ void init_ui() {
     wrefresh(ui.input_win);
 }
 
+#include <ncurses.h>
+
+void cleanup_ui(void) {
+    // 1. Reset terminal attributes
+    attrset(A_NORMAL);     // Reset all attributes
+    bkgd(COLOR_PAIR(0));   // Reset background to default
+    clear();               // Clear the screen
+    
+    // 2. Restore original colors (if modified)
+    if (can_change_color() && has_colors()) {
+        // Reset any custom colors to default
+        init_color(COLOR_BLACK, 0, 0, 0);
+        init_color(COLOR_RED, 1000, 0, 0);
+        init_color(COLOR_GREEN, 0, 1000, 0);
+        init_color(COLOR_YELLOW, 1000, 1000, 0);
+        init_color(COLOR_BLUE, 0, 0, 1000);
+        init_color(COLOR_MAGENTA, 1000, 0, 1000);
+        init_color(COLOR_CYAN, 0, 1000, 1000);
+        init_color(COLOR_WHITE, 1000, 1000, 1000);
+    }
+    
+    // 3. Stop ncurses properly
+    curs_set(1);           // Make cursor visible again
+    echo();                // Re-enable input echoing
+    nocbreak();            // Disable cbreak mode
+    keypad(stdscr, FALSE); // Disable special keypad keys
+    
+    // 4. End ncurses session
+    endwin();
+    
+    // 5. Reset terminal (optional, for POSIX systems)
+    system("stty sane");   // Fixes some terminal quirks
+}
+
 void get_username() {
     initscr();
     cbreak();
@@ -461,10 +495,34 @@ void* receive_messages(void *arg) {
         }
 
         // Handle user list updates
-        else if (strncmp(buffer, "USERS:", 6) == 0) {
+        else if ((strncmp(buffer, "USERS:", 6) == 0)) {
             peer_count = 0;
             char list_copy[MAX_MSG];
             strncpy(list_copy, buffer + 6, MAX_MSG - 1);
+            list_copy[MAX_MSG - 1] = '\0';
+
+            char *token = strtok(list_copy, ",");
+            while (token && peer_count < MAX_USERS) {
+                char name[MAX_NAME_LEN];
+                char ip[INET_ADDRSTRLEN];
+                int port;
+        
+                if (sscanf(token, "%[^:]:%[^:]:%d", name, ip, &port) == 3) {
+                    strncpy(peers[peer_count].name, name, MAX_NAME_LEN - 1);
+                    strncpy(peers[peer_count].ip, ip, INET_ADDRSTRLEN - 1);
+                    peers[peer_count].port = port;
+                    peers[peer_count].socket = -1;
+                    peer_count++;
+                }
+                token = strtok(NULL, ",");
+            }
+            update_user_list();
+            continue;
+        }
+        else if((strncmp(buffer, "chatUSERS:", 10) == 0)){
+            peer_count = 0;
+            char list_copy[MAX_MSG];
+            strncpy(list_copy, buffer + 10, MAX_MSG - 1);
             list_copy[MAX_MSG - 1] = '\0';
 
             char *token = strtok(list_copy, ",");
@@ -532,10 +590,7 @@ void* receive_messages(void *arg) {
             }
             continue;
         }
-        else if(strncmp(buffer,"/",1)==0){
-            add_message("Invalid command.");
-        }
-        else if(strncmp(buffer,"charUSERS",9) != 0){
+        else {
                 // Handle regular messages
                 update_log("global",buffer);
                 add_message(buffer);
@@ -620,9 +675,17 @@ void chat_loop() {
                 }
                 break;
             }
-            if (strncmp(input, "/connect ", 9) == 0) {                
+            else if (strncmp(input, "/connect ", 9) == 0) {                
+                char *temp = input + strlen("/connect ");
+                if(strncmp(temp,username,strlen(username))==0){
+                    add_message("You cannot connect to yourself.");
+                 continue;
+                }
                 launch_p2p_server();
                 send_to_current(input);
+            }
+            else if(strncmp(input,"/",1)==0){
+                add_message("Invalid command");
             }
             else {
                 send_to_current(input);
@@ -765,6 +828,7 @@ void handle_sigint(int sig) {
     if (current_socket != -1) {
         send_to_current("/quit");
     }
+    cleanup_ui();
     endwin();
     clear();
     exit(0);

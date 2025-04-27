@@ -43,6 +43,7 @@ int main() {
 
     if(p2p_socket != -1) close(p2p_socket);
     if(current_socket != -1) close(current_socket);
+    cleanup_ui();
     endwin();
     clear();
     return 0;

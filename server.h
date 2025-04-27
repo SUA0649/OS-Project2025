@@ -429,9 +429,6 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
         char leave_msg[MAX_WELCOME_MSG];
         snprintf(leave_msg, sizeof(leave_msg), "SERVER: %s has left the chat", 
         clients[found_index].name);
-        fflush(stdout);
-        printf("\n%s has Left\n",clients[found_index].name);
-        fflush(stdout);
         // Send leave notification
         for (int i = 0; i < client_count; i++) {
             if (i != found_index) {
