@@ -173,8 +173,7 @@ void lock_file(char * path){
 
 void handle_p2p_request(int client_sock, const char* target_name) {
     pthread_mutex_lock(&clients_mutex);
-    //printf("Hello world\n");    
-    // Find requester info
+
     ClientInfo requester = {0};
     int requester_found = 0;
     for (int i = 0; i < client_count; i++) {
@@ -297,13 +296,10 @@ void broadcast_user_list() {
     for (int i = 0; i < client_count; i++) {
         send(clients[i].socket, user_list, strlen(user_list) + 1, 0);
     }
-    //fflush(stdout);
-    //printf("%s   ",user_list);
-    //fflush(stdout);
-    
     free(user_list);
     pthread_mutex_unlock(&clients_mutex);
 }
+
 void handle_client(int client_sock, struct sockaddr_in client_addr) { 
     char temp_client_ip[INET_ADDRSTRLEN] = {0};
     char buffer[MAX_MSG_LEN] = {0};
@@ -318,7 +314,7 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
         return;
     }
     
-    printf("%s\n",buffer);
+    printf("A new client has joined:\n%s\n",buffer);
     // Parse username and local IP
     char *username = strtok(buffer, ":");
     char *local_ip = strtok(NULL, ":");
@@ -362,23 +358,22 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
         //printf("%s\n",buffer);
         if (bytes <= 0) break;
 
-        if (strcmp(buffer, "/quit") == 0){
+        else if (strcmp(buffer, "/quit") == 0){
             break;
         }
-         else if (strncmp(buffer, "/connect ", 9) == 0) {
+        else if (strncmp(buffer, "/connect ", 9) == 0) {
             // Handle P2P connection request
             char* target_name = buffer + 9;
             handle_p2p_request(client_sock, target_name);
             continue;
         }
-       
         else if (strncmp(buffer, "P2P_PORT:", 9) == 0) {
             // Client is telling us their P2P listening port
             int p2p_port = atoi(buffer + 9);
             pthread_mutex_lock(&clients_mutex);
             for (int i = 0; i < client_count; i++) {
                 if (clients[i].socket == client_sock) {
-                    printf("\n\np2p_port: %d\n", p2p_port);
+                    printf("Client port: %d, P2P_port: %d\n\n", clients[i].port,p2p_port);
                     clients[i].p2p_port = p2p_port;
                     break;
                 }
@@ -386,7 +381,10 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
             pthread_mutex_unlock(&clients_mutex);
             continue;
         }
-        
+        else if(strncmp(buffer,"/",1)==0){
+            continue;
+        }
+
         // Broadcast message with correct sender info
         pthread_mutex_lock(&clients_mutex);
         
@@ -431,14 +429,15 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
         char leave_msg[MAX_WELCOME_MSG];
         snprintf(leave_msg, sizeof(leave_msg), "SERVER: %s has left the chat", 
         clients[found_index].name);
-        
+        fflush(stdout);
+        printf("\n%s has Left\n",clients[found_index].name);
+        fflush(stdout);
         // Send leave notification
         for (int i = 0; i < client_count; i++) {
             if (i != found_index) {
                 send(clients[i].socket, leave_msg, strlen(leave_msg), 0);
             }
-        }
-        pthread_mutex_unlock(&clients_mutex);
+        }        pthread_mutex_unlock(&clients_mutex);
 
         remove_client(found_index); 
     }

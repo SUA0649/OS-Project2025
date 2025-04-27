@@ -102,6 +102,7 @@ int main(int argc, char *argv[]) {
             memset(input, 0, sizeof(input));
             wmove(ui_p2p.input_win, 1, 2);
             wclrtobot(ui_p2p.input_win);
+            box(ui_p2p.input_win, 0, 0);
             mvwprintw(ui_p2p.input_win, 1, 0, "> ");
             wrefresh(ui_p2p.input_win);
         }

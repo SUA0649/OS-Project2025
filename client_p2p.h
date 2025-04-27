@@ -28,7 +28,7 @@ void init_ui_p2p() {
     if (can_change_color()) {
         // RGB values for your desired background (203, 166, 247)
         // ncurses uses 0-1000 scale for colors
-        init_color(CUSTOM_COLOR_ID, 800, 650, 970); // Converted from 255-scale
+        init_color(CUSTOM_COLOR_ID, 102, 102, 180); // Converted from 255-scale
         init_pair(CUSTOM_PAIR_ID, COLOR_WHITE, CUSTOM_COLOR_ID);
         bkgd(COLOR_PAIR(CUSTOM_PAIR_ID));
     } else {
@@ -53,7 +53,8 @@ void init_ui_p2p() {
     wbkgd(ui_p2p.input_win, COLOR_PAIR(CUSTOM_PAIR_ID));
     
     wrefresh(ui_p2p.chat_win);
-
+    
+    box(ui_p2p.input_win, 0, 0);
     mvwprintw(ui_p2p.input_win, 1, 0, "> ");
     wrefresh(ui_p2p.input_win);
 

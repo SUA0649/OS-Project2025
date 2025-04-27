@@ -17,7 +17,7 @@
 //* structs and variables used for socketing and file managements
 
 #define MAX_FILEPATH 523
-#define SERVER_IP "192.168.1.12"
+#define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 8080
 #define MAX_NAME_LEN 32
 #define MAX_MSG 512
@@ -130,7 +130,7 @@ void start_p2p_listener() {
     }
     
     snprintf(port_msg, sizeof(port_msg), "P2P_PORT:%d", p2p_listener_port);
-    sleep(1);
+    usleep(500); 
     send_to_current(port_msg);
     
 }
@@ -141,8 +141,12 @@ void launch_p2p_server() {
         // Child process - launch in pure server mode
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", local_port);
-        execlp("x-terminal-emulator", "x-terminal-emulator", "-e",  
-              "./client_p2p.exe", "server", username, port_str, LOCAL_IP, NULL);
+        execlp("x-terminal-emulator", "x-terminal-emulator", 
+            "-geometry", "100x30",
+            "-T", username, 
+            "-e", 
+            "sh", "-c", "TERM=xterm-256color; export TERM; ./client_p2p.exe server \"$1\" \"$2\" \"$3\"", 
+            "sh", username, port_str, LOCAL_IP, NULL);
         exit(1);
     }
 }
@@ -152,9 +156,13 @@ void launch_p2p_client(const char *peer_ip, int peer_port) {
     if (pid == 0) {
         // Child process - launch in pure client mode
         char port_str[16];
-        snprintf(port_str, sizeof(port_str), "%d", peer_port);   
-        execlp("x-terminal-emulator", "x-terminal-emulator", "-e", 
-              "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
+        snprintf(port_str, sizeof(port_str), "%d", peer_port);  
+        execlp("x-terminal-emulator", "x-terminal-emulator",
+            "-geometry", "100x30",
+            "-T", username,  // Sets window title to the username
+            "-e",
+            "sh", "-c", "TERM=xterm-256color; export TERM; exec ./client_p2p.exe client \"$1\" \"$2\" \"$3\"",
+            "sh", username, peer_ip, port_str, NULL);
         exit(1);
     }
 }
@@ -524,6 +532,9 @@ void* receive_messages(void *arg) {
             }
             continue;
         }
+        else if(strncmp(buffer,"/",1)==0){
+            add_message("Invalid command.");
+        }
         else if(strncmp(buffer,"charUSERS",9) != 0){
                 // Handle regular messages
                 update_log("global",buffer);
@@ -585,6 +596,30 @@ void chat_loop() {
             break;
         }
         else if (ch == '\n' && pos > 0) {
+            if(strcmp(input,"/quit")==0){
+                send_to_current("/quit");
+                break;
+            }
+            else if (strncmp(input, "/p2p ", 5) == 0) {
+                char *peer_ip = strtok(input + 5, " ");
+                char *peer_port_str = strtok(NULL, " ");
+                
+                if (peer_ip && peer_port_str) {
+                    int peer_port = atoi(peer_port_str);
+                    launch_p2p_client(peer_ip, peer_port);
+                } else {
+                    add_message("Invalid P2P command. Usage: /p2p <IP> <PORT>");
+                }
+            }
+            else if (strncmp(input, "/previous ", 10) == 0) {
+                char *target_user = strtok(input + 10, " ");
+                if (target_user) {
+                    display_previous_chat(target_user);
+                } else {
+                    add_message("Invalid command. Usage: /previous <username>");
+                }
+                break;
+            }
             if (strncmp(input, "/connect ", 9) == 0) {                
                 launch_p2p_server();
                 send_to_current(input);
@@ -597,6 +632,7 @@ void chat_loop() {
             memset(input, 0, sizeof(input));
             wmove(ui.input_win, 1, 2);
             wclrtobot(ui.input_win);
+            box(ui.input_win, 0, 0);
             mvwprintw(ui.input_win, 1, 0, "> ");
             wrefresh(ui.input_win);
         }
