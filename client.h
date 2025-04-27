@@ -13,7 +13,7 @@
 #include <ctype.h>
 
 #define MAX_FILEPATH 300
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "192.168.1.12"
 #define SERVER_PORT 8080
 #define MAX_NAME_LEN 32
 #define MAX_MSG 512
