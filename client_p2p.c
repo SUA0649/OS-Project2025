@@ -1,7 +1,6 @@
 #include "client_p2p.h"
 
 int main(int argc, char *argv[]) {
-    
     if (argc == 5 && strcmp(argv[1], "server") == 0) {
         // SERVER MODE - Full listener implementation
         init_ui_p2p();

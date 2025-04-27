@@ -8,9 +8,13 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include "Utils/cJSON.h"
 #include <stdbool.h>
 #include <ctype.h>
+#include <errno.h>
+
+//* structs and variables used for socketing and file managements
 
 #define MAX_FILEPATH 523
 #define SERVER_IP "192.168.1.12"
@@ -31,34 +35,6 @@ int local_port = -1;
 int current_socket = -1;
 int p2p_listener_port = -1;
 char p2p_response = 0;
-
-
-char* read_file(const char *filename){
-    FILE *fp = fopen(filename, "r");
-    if (!fp) return NULL;
-
-    fseek(fp, 0, SEEK_END);
-    long size = ftell(fp);
-    rewind(fp);
-
-    char *data = (char *)malloc(size + 1);
-    fread(data, 1, size, fp);
-    data[size] = '\0';
-    fclose(fp);
-    return data;
-}
-
-void write_file(const char *filename, cJSON *json) {
-    char *json_str = cJSON_Print(json);
-    FILE *fp = fopen(filename, "w");
-    if (!fp) {
-        printf("❌ Failed to write file.\n");
-        return;
-    }
-    fprintf(fp, "%s", json_str);
-    fclose(fp);
-    free(json_str);
-}
 
 typedef enum {
     INPUT_NORMAL,
@@ -102,7 +78,7 @@ ConnectionType current_conn_type = CONN_SERVER;
 int p2p_socket = -1;
 
 
-void launch_p2p_chat(const char *peer_ip, int peer_port);
+// void launch_p2p_chat(const char *peer_ip, int peer_port);
 int find_available_p2p_port();
 void add_message(const char *msg);
 void send_to_current(const char *msg);
@@ -112,88 +88,7 @@ void update_log(const char *target_user, const char *message);
 void display_previous_chat(const char *target_user);
 
 
-
-
-void display_previous_chat(const char *target_user) {
-    char file[MAX_FILEPATH];
-    snprintf(file, MAX_FILEPATH, "Logs/%s.json", username);
-
-    char *json_data = read_file(file);
-    if (!json_data) {
-        add_message("No previous chat found.\n");
-        return;
-    }
-
-    cJSON *root = cJSON_Parse(json_data);
-    free(json_data);
-    if (!root) {
-        fprintf(stderr, "Failed to parse chat log.\n");
-        return;
-    }
-
-    cJSON *messages = cJSON_GetObjectItem(root, "messages");
-    if (!messages || !cJSON_IsObject(messages)) {
-        add_message("No messages found.\n");
-        cJSON_Delete(root);
-        return;
-    }
-
-    cJSON *chat_array = cJSON_GetObjectItem(messages, target_user);
-    if (!chat_array || !cJSON_IsArray(chat_array)) {
-        add_message("No previous messages with user.\n");
-        cJSON_Delete(root);
-        return;
-    }
-
-    cJSON *msg = NULL;
-    cJSON_ArrayForEach(msg, chat_array) {
-        if (cJSON_IsString(msg)) {
-            add_message(msg->valuestring);
-        }
-    }
-
-    cJSON_Delete(root);
-}
-
-    
-void update_log(const char *target_user, const char *message) {
-    char file[MAX_FILEPATH];
-    snprintf(file, MAX_FILEPATH, "Logs/%s.json", username);
-
-    char *json_data = read_file(file);
-    cJSON *root = NULL;
-
-    if (json_data) {
-        root = cJSON_Parse(json_data);
-        free(json_data);
-    }
-
-    if (!root) {
-        root = cJSON_CreateObject();
-        cJSON_AddStringToObject(root, "username", username);
-        cJSON_AddItemToObject(root, "messages", cJSON_CreateObject());
-    }
-
-    cJSON *messages = cJSON_GetObjectItem(root, "messages");
-    if (!messages || !cJSON_IsObject(messages)) {
-        messages = cJSON_CreateObject();
-        cJSON_ReplaceItemInObject(root, "messages", messages);
-    }
-
-    // target_user could be "global" or "Faizan" or "Anne" etc.
-    cJSON *chat_array = cJSON_GetObjectItem(messages, target_user);
-    if (!chat_array || !cJSON_IsArray(chat_array)) {
-        chat_array = cJSON_CreateArray();
-        cJSON_AddItemToObject(messages, target_user, chat_array);
-    }
-
-    cJSON_AddItemToArray(chat_array, cJSON_CreateString(message));
-
-    write_file(file, root);
-    cJSON_Delete(root);
-}
-
-
+//* Functions used for socketing.
 int find_available_p2p_port() {
     for (int port = P2P_PORT_START; port <= P2P_PORT_END; port++) {
         int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -264,6 +159,64 @@ void launch_p2p_client(const char *peer_ip, int peer_port) {
     }
 }
 
+int connect_to_server() {
+    int sockfd;
+    struct sockaddr_in serv_addr;
+    
+    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        return -1;
+    }
+    
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(SERVER_PORT);
+    
+    if(inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
+        close(sockfd);
+        return -1;
+    }
+    
+    if(connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        close(sockfd);
+        return -1;
+    }
+    
+    // Send username and local IP to server in format "username:local_ip"
+    char init_msg[1000];
+    snprintf(init_msg, sizeof(init_msg), "%s:%s", username, LOCAL_IP);
+    if(send(sockfd, init_msg, strlen(init_msg), 0) < 0) {
+        close(sockfd);
+        return -1;
+    }
+    
+    return sockfd;
+}
+
+
+int connect_to_peer(const char *ip, int port) {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(sockfd < 0) return -1;
+
+    struct sockaddr_in peer_addr;
+    peer_addr.sin_family = AF_INET;
+    peer_addr.sin_port = htons(port);
+    inet_pton(AF_INET, ip, &peer_addr.sin_addr);
+
+    if(connect(sockfd, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) < 0) {
+        close(sockfd);
+        return -1;
+    }
+
+    return sockfd;
+}
+
+void send_to_current(const char *msg) {
+    if(current_socket != -1) {
+        send(current_socket, msg, strlen(msg), 0);
+    }
+}
+// --------------------------------------------------------------------------------------------------
+
+//* UI FUNCTIONS
 void init_ui() {
     initscr();
     cbreak();
@@ -349,8 +302,6 @@ void init_ui() {
     wrefresh(ui.input_win);
 }
 
-
-
 void get_username() {
     initscr();
     cbreak();
@@ -424,6 +375,7 @@ void update_user_list() {
     // Debug: print current window content
 }
 
+//* USED For adding messages to and from the other clients to the UI terminal.
 void add_message(const char *msg) {
     int maxy, maxx;
     getmaxyx(ui.chat_win, maxy, maxx);
@@ -479,55 +431,7 @@ void add_message(const char *msg) {
     wrefresh(ui.chat_win);
 }
 
-int connect_to_server() {
-    int sockfd;
-    struct sockaddr_in serv_addr;
-    
-    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        return -1;
-    }
-    
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(SERVER_PORT);
-    
-    if(inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
-        close(sockfd);
-        return -1;
-    }
-    
-    if(connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        close(sockfd);
-        return -1;
-    }
-    
-    // Send username and local IP to server in format "username:local_ip"
-    char init_msg[1000];
-    snprintf(init_msg, sizeof(init_msg), "%s:%s", username, LOCAL_IP);
-    if(send(sockfd, init_msg, strlen(init_msg), 0) < 0) {
-        close(sockfd);
-        return -1;
-    }
-    
-    return sockfd;
-}
 
-
-int connect_to_peer(const char *ip, int port) {
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if(sockfd < 0) return -1;
-
-    struct sockaddr_in peer_addr;
-    peer_addr.sin_family = AF_INET;
-    peer_addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip, &peer_addr.sin_addr);
-
-    if(connect(sockfd, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) < 0) {
-        close(sockfd);
-        return -1;
-    }
-
-    return sockfd;
-}
 
 void* receive_messages(void *arg) {
     ThreadData *data = (ThreadData *)arg;
@@ -631,11 +535,7 @@ void* receive_messages(void *arg) {
     return NULL;
 }
 
-void send_to_current(const char *msg) {
-    if(current_socket != -1) {
-        send(current_socket, msg, strlen(msg), 0);
-    }
-}
+
 
 void chat_loop() {
     char input[MAX_MSG] = {0};
@@ -715,8 +615,117 @@ void chat_loop() {
     
 }
 
-void handle_sigint(int sig) {
+//* All files required for JSON FILES.
+
+char* read_file(const char *filename){
+    FILE *fp = fopen(filename, "r");
+    if (!fp) return NULL;
+
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    rewind(fp);
+
+    char *data = (char *)malloc(size + 1);
+    fread(data, 1, size, fp);
+    data[size] = '\0';
+    fclose(fp);
+    return data;
+}
+
+void write_file(const char *filename, cJSON *json) {
+    char *json_str = cJSON_Print(json);
+    FILE *fp = fopen(filename, "w");
+    if (!fp) {
+        printf("❌ Failed to write file.\n");
+        return;
+    }
+    fprintf(fp, "%s", json_str);
+    fclose(fp);
+    free(json_str);
+}
+
+void display_previous_chat(const char *target_user) {
     
+    char file[MAX_FILEPATH];
+    snprintf(file, MAX_FILEPATH, "Logs/%s.json", username);
+
+    char *json_data = read_file(file);
+    if (!json_data) {
+        add_message("No previous chat found.\n");
+        return;
+    }
+
+    cJSON *root = cJSON_Parse(json_data);
+    free(json_data);
+    if (!root) {
+        fprintf(stderr, "Failed to parse chat log.\n");
+        return;
+    }
+
+    cJSON *messages = cJSON_GetObjectItem(root, "messages");
+    if (!messages || !cJSON_IsObject(messages)) {
+        add_message("No messages found.\n");
+        cJSON_Delete(root);
+        return;
+    }
+
+    cJSON *chat_array = cJSON_GetObjectItem(messages, target_user);
+    if (!chat_array || !cJSON_IsArray(chat_array)) {
+        add_message("No previous messages with user.\n");
+        cJSON_Delete(root);
+        return;
+    }
+
+    cJSON *msg = NULL;
+    cJSON_ArrayForEach(msg, chat_array) {
+        if (cJSON_IsString(msg)) {
+            add_message(msg->valuestring);
+        }
+    }
+
+    cJSON_Delete(root);
+}
+
+    
+void update_log(const char *target_user, const char *message) {
+    char file[MAX_FILEPATH];
+    snprintf(file, MAX_FILEPATH, "Logs/%s.json", username);
+
+    char *json_data = read_file(file);
+    cJSON *root = NULL;
+
+    if (json_data) {
+        root = cJSON_Parse(json_data);
+        free(json_data);
+    }
+
+    if (!root) {
+        root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "username", username);
+        cJSON_AddItemToObject(root, "messages", cJSON_CreateObject());
+    }
+
+    cJSON *messages = cJSON_GetObjectItem(root, "messages");
+    if (!messages || !cJSON_IsObject(messages)) {
+        messages = cJSON_CreateObject();
+        cJSON_ReplaceItemInObject(root, "messages", messages);
+    }
+
+    // target_user could be "global" or "Faizan" or "Anne" etc.
+    cJSON *chat_array = cJSON_GetObjectItem(messages, target_user);
+    if (!chat_array || !cJSON_IsArray(chat_array)) {
+        chat_array = cJSON_CreateArray();
+        cJSON_AddItemToObject(messages, target_user, chat_array);
+    }
+
+    cJSON_AddItemToArray(chat_array, cJSON_CreateString(message));
+
+    write_file(file, root);
+    cJSON_Delete(root);
+}
+
+
+void handle_sigint(int sig) {    
     if (current_socket != -1) {
         send_to_current("/quit");
     }
@@ -724,3 +733,4 @@ void handle_sigint(int sig) {
     clear();
     exit(0);
 }
+

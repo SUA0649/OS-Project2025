@@ -66,6 +66,7 @@ void handle_sigint(int sig) {
     exit(0);
 }
 
+//* Used for creating the server from main.
 void create_server(){
     signal(SIGINT, handle_sigint);
     struct sockaddr_in address;
@@ -156,7 +157,7 @@ void create_server(){
 }
 
 
-
+//* Used so that no two server can run on a single computer.
 void lock_file(char * path){
     if(access(LOCK_FILE,F_OK)==0){
         printf("Another instance of a server is running on the local network.");
@@ -211,28 +212,7 @@ void handle_p2p_request(int client_sock, const char* target_name) {
     pthread_mutex_unlock(&clients_mutex);
 }
 
-void send_p2p_invitation(const char* requester_name, const char* requester_ip, 
-    int requester_port, const char* target_name) {
-    char invitation[MAX_MSG_LEN + MAX_NAME_LEN * 2 + 50];
-    snprintf(invitation, sizeof(invitation), 
-             "P2P_INVITE:%s:%s:%d", 
-             requester_name, requester_ip, requester_port);
-    
-    pthread_mutex_lock(&clients_mutex);
-    for (int i = 0; i < client_count; i++) {
-        if (strcmp(clients[i].name, target_name) == 0) {
-            //printf("\n\n%s %s %d %s\n",requester_name, requester_ip, requester_port, target_name);
-            send(clients[i].socket, invitation, strlen(invitation), 0);
-            break;
-        }
-    }
-    pthread_mutex_unlock(&clients_mutex);
-}
-
-
-
-
-
+//* Client Handling 
 void add_client(const char *name, const char *ip, int port, int socket) {
     pthread_mutex_lock(&clients_mutex);
     
@@ -466,6 +446,27 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
     close(client_sock);
 }
 
+//* Used for sending p2p invitation
+void send_p2p_invitation(const char* requester_name, const char* requester_ip, 
+    int requester_port, const char* target_name) {
+    char invitation[MAX_MSG_LEN + MAX_NAME_LEN * 2 + 50];
+    snprintf(invitation, sizeof(invitation), 
+             "P2P_INVITE:%s:%s:%d", 
+             requester_name, requester_ip, requester_port);
+    
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp(clients[i].name, target_name) == 0) {
+            //printf("\n\n%s %s %d %s\n",requester_name, requester_ip, requester_port, target_name);
+            send(clients[i].socket, invitation, strlen(invitation), 0);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+
+//* Used for keeping the threads inactive when there is no work available through queue mechanism.
 void *thread_worker(void *arg) {
     while(server_running) {
         connection_queue_t *item = NULL;

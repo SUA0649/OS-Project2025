@@ -9,7 +9,6 @@
 //Forward Declaration.
 void init_ui_p2p();
 void add_messages(const char *msg);
-int connect_to_peer(const char *ip, int port);
 void* receives_messages(void *arg);
 void display_previous_chat_p2p(const char *target_user);
 void update_log(const char *target_user, const char *message);
@@ -61,6 +60,8 @@ void init_ui_p2p() {
     ui_p2p.users_win = NULL;
 }
 
+
+//* Implement message adding functions
 void add_messages(const char *msg) {
     int maxy, maxx;
     getmaxyx(ui_p2p.chat_win, maxy, maxx);
@@ -116,24 +117,31 @@ void add_messages(const char *msg) {
     wrefresh(ui_p2p.chat_win);
 }
 
-// // Implement network functions
-// int connect_to_peer(const char *ip, int port) {
-//     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-//     if(sockfd < 0) return -1;
+void* receives_messages(void *arg) {
+    ThreadData *data = (ThreadData *)arg;
+    char buffer[MAX_MSG];
+    
+    memset(buffer, 0, sizeof(buffer));
+    int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
+    strcpy(peer_username,buffer);
+    display_previous_chat_p2p(buffer);
+    while(1) {
+        memset(buffer, 0, sizeof(buffer));
+        valread = recv(data->sockfd, buffer, MAX_MSG, 0);
+        
+        if(valread <= 0) {
+            add_messages("Peer disconnected");
+            break;
+        }
+        // char *buf_cpy[50];
+        // strcpy(buf_cpy,buffer);
+        add_messages(buffer);
+        update_log(peer_username,buffer);
+    }
+    return NULL;
+}
 
-//     struct sockaddr_in peer_addr;
-//     peer_addr.sin_family = AF_INET;
-//     peer_addr.sin_port = htons(port);
-//     inet_pton(AF_INET, ip, &peer_addr.sin_addr);
-
-//     if(connect(sockfd, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) < 0) {
-//         close(sockfd);
-//         return -1;
-//     }
-
-//     return sockfd;
-// }
-
+//* Used for storing the logs in the LOGS FOLDER.
 void display_previous_chat_p2p(const char *target_user) {
     char file[MAX_FILEPATH];
     snprintf(file, MAX_FILEPATH, "Logs/%s.json", username);
@@ -175,26 +183,3 @@ void display_previous_chat_p2p(const char *target_user) {
     cJSON_Delete(root);
 }
 
-void* receives_messages(void *arg) {
-    ThreadData *data = (ThreadData *)arg;
-    char buffer[MAX_MSG];
-    
-    memset(buffer, 0, sizeof(buffer));
-    int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
-    strcpy(peer_username,buffer);
-    display_previous_chat_p2p(buffer);
-    while(1) {
-        memset(buffer, 0, sizeof(buffer));
-        valread = recv(data->sockfd, buffer, MAX_MSG, 0);
-        
-        if(valread <= 0) {
-            add_messages("Peer disconnected");
-            break;
-        }
-        // char *buf_cpy[50];
-        // strcpy(buf_cpy,buffer);
-        add_messages(buffer);
-        update_log(peer_username,buffer);
-    }
-    return NULL;
-}

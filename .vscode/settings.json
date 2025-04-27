@@ -59,6 +59,8 @@
   "makefile.configureOnOpen": true,
   "files.associations": {
     "stdio.h": "c",
-    "client.h": "c"
+    "client.h": "c",
+    "string.h": "c",
+    "client_p2p.h": "c"
   }
 }

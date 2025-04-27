@@ -2,6 +2,12 @@
 
 
 int main() {
+    if (mkdir("Logs", 0755) == -1) {
+        if (errno != EEXIST) {  // Ignore error if directory already exists
+            perror("Failed to create Logs directory");
+            return -1;
+        }
+    }
     signal(SIGINT,handle_sigint);
     get_username();
     // Get valid port
