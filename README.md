@@ -8,6 +8,9 @@
 - Muhammad Faizan Jawaid (23K-0688)
 - Shayan Mustafa (23K-0924)
 - Shahnoor Ahmed (23I-0543)
+
+### Project Supervisor:
+- Dr. Nadeem Kafi
 ---
 
 ## Features
