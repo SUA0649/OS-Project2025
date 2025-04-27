@@ -10,45 +10,52 @@ int p2p_listener_port = -1;
 char p2p_response = 0;
 
 
-void display_previous_chat(){
+
+void display_previous_chat(const char *target_user) {
     char file[MAX_FILEPATH];
-    snprintf(file,MAX_FILEPATH,"Logs/%s.json",username);
+    snprintf(file, MAX_FILEPATH, "Logs/%s.json", username);
+
     char *json_data = read_file(file);
-
-    cJSON *root=NULL;
-
-    if(!json_data){
-        root = cJSON_CreateObject();
-        cJSON_AddStringToObject(root,"username",username);
-        cJSON_AddItemToObject(root,"messages",cJSON_CreateArray()); 
+    if (!json_data) {
+        printf("No previous chat found.\n");
         return;
     }
-    else{
-        root = cJSON_Parse(json_data);
-        free(json_data);
-        if(!root){
-            fprintf(stderr,"Failed to parse chat log.");
-            return ;
-        }
-        cJSON *messages = cJSON_GetObjectItem(root,"messages");
-        if(!cJSON_IsArray(messages)){
-            fprintf(stderr,"Wrong format stored in the JSON file.");
-            cJSON_Delete(root);
-            return ;
-        }
-        cJSON *msg=NULL;
-        cJSON_ArrayForEach(msg,messages){
-            if(cJSON_IsString){
-                add_message(msg->valuestring);
-            }
+
+    cJSON *root = cJSON_Parse(json_data);
+    free(json_data);
+    if (!root) {
+        fprintf(stderr, "Failed to parse chat log.\n");
+        return;
+    }
+
+    cJSON *messages = cJSON_GetObjectItem(root, "messages");
+    if (!messages || !cJSON_IsObject(messages)) {
+        printf("No messages found.\n");
+        cJSON_Delete(root);
+        return;
+    }
+
+    cJSON *chat_array = cJSON_GetObjectItem(messages, target_user);
+    if (!chat_array || !cJSON_IsArray(chat_array)) {
+        printf("No previous messages with %s.\n", target_user);
+        cJSON_Delete(root);
+        return;
+    }
+
+    cJSON *msg = NULL;
+    cJSON_ArrayForEach(msg, chat_array) {
+        if (cJSON_IsString(msg)) {
+            add_message(msg->valuestring);
         }
     }
+
     cJSON_Delete(root);
 }
+
     
-void update_log(const char *message) {
+void update_log(const char *target_user, const char *message) {
     char file[MAX_FILEPATH];
-    snprintf(file,MAX_FILEPATH,"Logs/%s.json", username);
+    snprintf(file, MAX_FILEPATH, "Logs/%s.json", username);
 
     char *json_data = read_file(file);
     cJSON *root = NULL;
@@ -61,17 +68,24 @@ void update_log(const char *message) {
     if (!root) {
         root = cJSON_CreateObject();
         cJSON_AddStringToObject(root, "username", username);
-        cJSON_AddItemToObject(root, "messages", cJSON_CreateArray());
+        cJSON_AddItemToObject(root, "messages", cJSON_CreateObject());
     }
 
     cJSON *messages = cJSON_GetObjectItem(root, "messages");
-    if (!cJSON_IsArray(messages)) {
-        messages = cJSON_CreateArray();
+    if (!messages || !cJSON_IsObject(messages)) {
+        messages = cJSON_CreateObject();
         cJSON_ReplaceItemInObject(root, "messages", messages);
     }
-    cJSON_AddItemToArray(messages, cJSON_CreateString(message));
 
-    // Save back to file
+    // target_user could be "global" or "Faizan" or "Anne" etc.
+    cJSON *chat_array = cJSON_GetObjectItem(messages, target_user);
+    if (!chat_array || !cJSON_IsArray(chat_array)) {
+        chat_array = cJSON_CreateArray();
+        cJSON_AddItemToObject(messages, target_user, chat_array);
+    }
+
+    cJSON_AddItemToArray(chat_array, cJSON_CreateString(message));
+
     write_file(file, root);
     cJSON_Delete(root);
 }
@@ -416,7 +430,7 @@ void* receive_messages(void *arg) {
     ThreadData *data = (ThreadData *)arg;
     char buffer[MAX_MSG];
     
-    display_previous_chat();
+    display_previous_chat("global");
 
     while(1) {
         memset(buffer, 0, sizeof(buffer));
@@ -505,7 +519,7 @@ void* receive_messages(void *arg) {
         }
         else if(strncmp(buffer,"charUSERS",9) != 0){
                 // Handle regular messages
-                update_log(buffer);
+                update_log("global",buffer);
                 add_message(buffer);
     
         }

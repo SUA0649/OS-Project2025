@@ -6,12 +6,15 @@
 
 // Shared variables needed for P2P client
 UI ui;
+char peer_username[MAX_MSG] = {0};
 
 // Forward declarations different from client.c
 void init_ui();
 void add_message(const char *msg);
 int connect_to_peer(const char *ip, int port);
 void* receive_messages(void *arg);
+void display_previous_chat(const char *target_user);
+void update_log(const char *target_user, const char *message);
 
 int main(int argc, char *argv[]) {
     
@@ -99,7 +102,7 @@ int main(int argc, char *argv[]) {
     // Main input loop
     char input[MAX_MSG] = {0};
     int ch, pos = 0;
-    
+    send(p2p_socket,username,strlen(username),0);
     while(1) {
         ch = getch();
         
@@ -110,7 +113,7 @@ int main(int argc, char *argv[]) {
             char formatted_msg[MAX_MSG + 20];
             snprintf(formatted_msg, sizeof(formatted_msg), "%s: %s", username, input);
             add_message(formatted_msg);
-
+            update_log(peer_username,formatted_msg);
             send(p2p_socket, formatted_msg, strlen(formatted_msg), 0);
             pos = 0;
             memset(input, 0, sizeof(input));
@@ -218,20 +221,108 @@ int connect_to_peer(const char *ip, int port) {
     return sockfd;
 }
 
+
+void display_previous_chat(const char *target_user) {
+    char file[MAX_FILEPATH];
+    snprintf(file, MAX_FILEPATH, "Logs/%s.json", username);
+
+    char *json_data = read_file(file);
+    if (!json_data) {
+        printf("No previous chat found.\n");
+        return;
+    }
+
+    cJSON *root = cJSON_Parse(json_data);
+    free(json_data);
+    if (!root) {
+        fprintf(stderr, "Failed to parse chat log.\n");
+        return;
+    }
+
+    cJSON *messages = cJSON_GetObjectItem(root, "messages");
+    if (!messages || !cJSON_IsObject(messages)) {
+        printf("No messages found.\n");
+        cJSON_Delete(root);
+        return;
+    }
+
+    cJSON *chat_array = cJSON_GetObjectItem(messages, target_user);
+    if (!chat_array || !cJSON_IsArray(chat_array)) {
+        printf("No previous messages with %s.\n", target_user);
+        cJSON_Delete(root);
+        return;
+    }
+
+    cJSON *msg = NULL;
+    cJSON_ArrayForEach(msg, chat_array) {
+        if (cJSON_IsString(msg)) {
+            add_message(msg->valuestring);
+        }
+    }
+
+    cJSON_Delete(root);
+}
+
+    
+void update_log(const char *target_user, const char *message) {
+    char file[MAX_FILEPATH];
+    snprintf(file, MAX_FILEPATH, "Logs/%s.json", username);
+
+    char *json_data = read_file(file);
+    cJSON *root = NULL;
+
+    if (json_data) {
+        root = cJSON_Parse(json_data);
+        free(json_data);
+    }
+
+    if (!root) {
+        root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "username", username);
+        cJSON_AddItemToObject(root, "messages", cJSON_CreateObject());
+    }
+
+    cJSON *messages = cJSON_GetObjectItem(root, "messages");
+    if (!messages || !cJSON_IsObject(messages)) {
+        messages = cJSON_CreateObject();
+        cJSON_ReplaceItemInObject(root, "messages", messages);
+    }
+
+    // target_user could be "global" or "Faizan" or "Anne" etc.
+    cJSON *chat_array = cJSON_GetObjectItem(messages, target_user);
+    if (!chat_array || !cJSON_IsArray(chat_array)) {
+        chat_array = cJSON_CreateArray();
+        cJSON_AddItemToObject(messages, target_user, chat_array);
+    }
+
+    cJSON_AddItemToArray(chat_array, cJSON_CreateString(message));
+
+    write_file(file, root);
+    cJSON_Delete(root);
+}
+
+
 void* receive_messages(void *arg) {
     ThreadData *data = (ThreadData *)arg;
     char buffer[MAX_MSG];
     
+    int count=0;
+    memset(buffer, 0, sizeof(buffer));
+    int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
+    strcpy(peer_username,buffer);
+    display_previous_chat(buffer);
     while(1) {
         memset(buffer, 0, sizeof(buffer));
-        int valread = recv(data->sockfd, buffer, MAX_MSG, 0);
+        valread = recv(data->sockfd, buffer, MAX_MSG, 0);
         
         if(valread <= 0) {
             add_message("Peer disconnected");
             break;
         }
-        
+        // char *buf_cpy[50];
+        // strcpy(buf_cpy,buffer);
         add_message(buffer);
+        update_log(peer_username,buffer);
     }
     return NULL;
 }

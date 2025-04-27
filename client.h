@@ -13,7 +13,7 @@
 #include <ctype.h>
 
 #define MAX_FILEPATH 300
-#define SERVER_IP "172.28.206.43"
+#define SERVER_IP "192.168.1.12"
 #define SERVER_PORT 8080
 #define MAX_NAME_LEN 32
 #define MAX_MSG 512
@@ -98,3 +98,5 @@ void add_message(const char *msg);
 void send_to_current(const char *msg);
 void launch_p2p_server();  // For the peer that accepts connection
 void launch_p2p_client(const char *peer_ip, int peer_port);  // For the peer that initiates
+void update_log(const char *target_user, const char *message);
+void display_previous_chat(const char *target_user);
