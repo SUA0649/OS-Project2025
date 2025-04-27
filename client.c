@@ -1,4 +1,7 @@
 #include "client.h"
+#define CUSTOM_COLOR_ID 10 // Custom color ID (not conflicting with base colors)
+#define CUSTOM_PAIR_ID 20   // Color pair ID
+
 
 char LOCAL_IP[INET_ADDRSTRLEN];
 int local_port = -1;
@@ -114,8 +117,8 @@ void start_p2p_listener() {
         return;
     }
     
-    
     snprintf(port_msg, sizeof(port_msg), "P2P_PORT:%d", p2p_listener_port);
+    sleep(1);
     send_to_current(port_msg);
     
 }
@@ -126,8 +129,7 @@ void launch_p2p_server() {
         // Child process - launch in pure server mode
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", local_port);
-        execlp("x-terminal-emulator", "x-terminal-emulator",
-            "-bg", "black", "-fg", "white", "-e",  
+        execlp("x-terminal-emulator", "x-terminal-emulator", "-e",  
               "./client_p2p.exe", "server", username, port_str, LOCAL_IP, NULL);
         exit(1);
     }
@@ -139,35 +141,140 @@ void launch_p2p_client(const char *peer_ip, int peer_port) {
         // Child process - launch in pure client mode
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", peer_port);   
-        execlp("x-terminal-emulator", "x-terminal-emulator"
-              ,"-bg", "black", "-fg", "white", "-e", 
+        execlp("x-terminal-emulator", "x-terminal-emulator", "-e", 
               "./client_p2p.exe", "client", username, peer_ip, port_str, NULL);
         exit(1);
     }
 }
 
 void init_ui() {
-        initscr();
-        cbreak();
-        noecho();
-        keypad(stdscr, TRUE);
-        refresh();
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, false);
+    start_color();
+
+    if (can_change_color()) {
+        init_color(CUSTOM_COLOR_ID, 102, 102, 180); // Dark navy background
+        init_pair(CUSTOM_PAIR_ID, COLOR_WHITE, CUSTOM_COLOR_ID); // White text on custom background
+        bkgd(COLOR_PAIR(CUSTOM_PAIR_ID)); // Set stdscr background
+    } else {
+        init_pair(CUSTOM_PAIR_ID, COLOR_WHITE, COLOR_BLACK);
+        bkgd(COLOR_PAIR(CUSTOM_PAIR_ID));
+    }
+    clear();
+    refresh();
+
+    // Define color pairs for rainbow ASCII art
+    init_pair(1, COLOR_CYAN, CUSTOM_COLOR_ID);
+    init_pair(2, COLOR_MAGENTA, CUSTOM_COLOR_ID);
+    init_pair(3, COLOR_YELLOW, CUSTOM_COLOR_ID);
+    init_pair(4, COLOR_GREEN, CUSTOM_COLOR_ID);
+    init_pair(5, COLOR_RED, CUSTOM_COLOR_ID);
+    init_pair(6, COLOR_BLUE, CUSTOM_COLOR_ID);
     
-        ui.chat_win = newwin(LINES-3, COLS-USER_LIST_WIDTH-1, 0, 0);
-        scrollok(ui.chat_win, TRUE);
-        box(ui.chat_win, 0, 0);
-        mvwprintw(ui.chat_win, 0, 2, " Chat ");
-        ui.chat_line = 1;  // Initialize at line 1 (inside the box)
-        wrefresh(ui.chat_win);
+    const char *art_lines[] = {
+        " _____                   _____                  _            _   ",
+        "|   | | ___  ___  _ _   |_   _|___  ___  _____ |_| ___  ___ | |  ",
+        "| | | || -_||  _|| | |    | | | -_||  _||     || ||   || .'|| |  ",
+        "|_|___||___||_|   \\_/     |_| |___||_|  |_|_|_||_||_|_||__,||_|  ",
+        "                                                                 "
+    };
+
+    int art_height = sizeof(art_lines) / sizeof(art_lines[0]);
+    int art_width = strlen(art_lines[0]);
+    int center_col = (COLS - art_width) / 2;
+    int start_row = 0;
+
+    int num_colors = 6;
+    int chunk_width = art_width / num_colors;
+
+    // Draw ASCII Art
+    for (int i = 0; i < art_height; i++) {
+        for (int j = 0; j < art_width; j++) {
+            int color_index = (j / chunk_width) % num_colors + 1;
+            attron(COLOR_PAIR(color_index));
+            mvaddch(start_row + i, center_col + j, art_lines[i][j]);
+            attroff(COLOR_PAIR(color_index));
+        }
+    }
+    refresh();
+    napms(500);
+
+    // Calculate space for windows
+    int remaining_height = LINES - art_height - 3;
+
+    // Create windows
+    ui.chat_win = newwin(remaining_height, COLS - USER_LIST_WIDTH - 1, art_height, 0);
+    ui.users_win = newwin(remaining_height, USER_LIST_WIDTH, art_height, COLS - USER_LIST_WIDTH);
+    ui.input_win = newwin(3, COLS - USER_LIST_WIDTH - 1, LINES - 3, 0);
+
+    // Apply same background color to all windows
+    wbkgd(ui.chat_win, COLOR_PAIR(CUSTOM_PAIR_ID));
+    wbkgd(ui.users_win, COLOR_PAIR(CUSTOM_PAIR_ID));
+    wbkgd(ui.input_win, COLOR_PAIR(CUSTOM_PAIR_ID));
+
+    // Setup chat window
+    scrollok(ui.chat_win, TRUE);
+    box(ui.chat_win, 0, 0);
+    mvwprintw(ui.chat_win, 0, 2, " Chat ");
+    ui.chat_line = 1;
+    wrefresh(ui.chat_win);
+
+    // Setup users window
+    box(ui.users_win, 0, 0);
+    mvwprintw(ui.users_win, 0, 2, " Online Users ");
+    wrefresh(ui.users_win);
+
+    // Setup input window
+    box(ui.input_win, 0, 0);
+    mvwprintw(ui.input_win, 1, 0, "> ");
+    wrefresh(ui.input_win);
+}
+
+
+
+void get_username() {
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    start_color();
+
+    // Set up color scheme
+    if (can_change_color()) {
+        // RGB values for your desired background (203, 166, 247)
+        // ncurses uses 0-1000 scale for colors (1000 = 255 * 3.92)
+        init_color(CUSTOM_COLOR_ID, 102, 102, 180);
+        init_pair(CUSTOM_PAIR_ID, COLOR_WHITE, CUSTOM_COLOR_ID);
+        bkgd(COLOR_PAIR(CUSTOM_PAIR_ID)); // Set main window background
+    } else {
+        init_pair(CUSTOM_PAIR_ID, COLOR_WHITE, COLOR_BLACK);
+        bkgd(COLOR_PAIR(CUSTOM_PAIR_ID));
+    }
+    clear();
+    refresh();
+
+    // Create username window with same background
+    WINDOW *uname_win = newwin(5, 40, LINES/2-3, COLS/2-20);
+    wbkgd(uname_win, COLOR_PAIR(CUSTOM_PAIR_ID)); // Set same background color
+    box(uname_win, 0, 0);
+    mvwprintw(uname_win, 1, 1, "Enter your username: ");
+    wrefresh(uname_win);
     
-        ui.users_win = newwin(LINES-3, USER_LIST_WIDTH, 0, COLS-USER_LIST_WIDTH);
-        box(ui.users_win, 0, 0);
-        mvwprintw(ui.users_win, 0, 2, " Online Users ");
-        wrefresh(ui.users_win);
+    // Get username input
+    echo();
+    mvwgetnstr(uname_win, 2, 1, username, MAX_MSG-1);
+    noecho();
     
-        ui.input_win = newwin(3, COLS-USER_LIST_WIDTH-1, LINES-3, 0);
-        mvwprintw(ui.input_win, 1, 0, "> ");
-        wrefresh(ui.input_win);
+    if(strlen(username) == 0) {
+        strcpy(username, "Anonymous");
+    }
+        // Clean up
+    delwin(uname_win);
+    clear();
+    refresh();
+    
     
 }
 
@@ -221,6 +328,7 @@ void add_message(const char *msg) {
                 mvwinstr(ui.chat_win, i + 1, 1, line_content);
                 mvwprintw(ui.chat_win, i, 1, "%-*s", available_width, line_content);
             }
+
             wmove(ui.chat_win, available_height - 1, 1);
             wclrtoeol(ui.chat_win);
             ui.chat_line = available_height - 1;
@@ -252,26 +360,6 @@ void add_message(const char *msg) {
     box(ui.chat_win, 0, 0);
     mvwprintw(ui.chat_win, 0, 2, " Chat ");
     wrefresh(ui.chat_win);
-}
-
-void get_username() {
-    initscr();
-    WINDOW *uname_win = newwin(5, 40, LINES/2-3, COLS/2-20);
-    box(uname_win, 0, 0);
-    mvwprintw(uname_win, 1, 1, "Enter your username: ");
-    wrefresh(uname_win);
-    
-    echo();
-    mvwgetnstr(uname_win, 2, 1, username, MAX_MSG-1);
-    noecho();
-    
-    delwin(uname_win);
-    clear();
-    refresh();
-
-    if(strlen(username) == 0) {
-        strcpy(username, "Anonymous");
-    }
 }
 
 int connect_to_server() {
@@ -516,6 +604,7 @@ void handle_sigint(int sig) {
         send_to_current("/quit");
     }
     endwin();
+    clear();
     exit(0);
 }
 
@@ -556,5 +645,6 @@ int main() {
     if(p2p_socket != -1) close(p2p_socket);
     if(current_socket != -1) close(current_socket);
     endwin();
+    clear();
     return 0;
 }

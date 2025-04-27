@@ -13,7 +13,7 @@
 #include <ctype.h>
 
 #define MAX_FILEPATH 300
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "172.28.206.43"
 #define SERVER_PORT 8080
 #define MAX_NAME_LEN 32
 #define MAX_MSG 512
@@ -75,6 +75,7 @@ typedef struct {
     WINDOW *chat_win;
     WINDOW *users_win;
     WINDOW *input_win;
+    WINDOW *title_win;
     int chat_line;
 } UI;
 

@@ -1,4 +1,8 @@
 #include "client.h"
+#define CUSTOM_COLOR_ID 10
+#define CUSTOM_PAIR_ID 20
+#define USER_LIST_WIDTH 30
+
 
 // Shared variables needed for P2P client
 UI ui;
@@ -105,6 +109,8 @@ int main(int argc, char *argv[]) {
         else if(ch == '\n' && pos > 0) {
             char formatted_msg[MAX_MSG + 20];
             snprintf(formatted_msg, sizeof(formatted_msg), "%s: %s", username, input);
+            add_message(formatted_msg);
+
             send(p2p_socket, formatted_msg, strlen(formatted_msg), 0);
             pos = 0;
             memset(input, 0, sizeof(input));
@@ -139,13 +145,33 @@ void init_ui() {
     initscr();
     cbreak();
     noecho();
-    keypad(stdscr, TRUE);
+    keypad(stdscr, false);
+    start_color();
+    
+    if (can_change_color()) {
+        // RGB values for your desired background (203, 166, 247)
+        // ncurses uses 0-1000 scale for colors
+        init_color(CUSTOM_COLOR_ID, 800, 650, 970); // Converted from 255-scale
+        init_pair(CUSTOM_PAIR_ID, COLOR_WHITE, CUSTOM_COLOR_ID);
+        bkgd(COLOR_PAIR(CUSTOM_PAIR_ID));
+    } else {
+        // Fallback to black background if custom colors not supported
+        init_pair(CUSTOM_PAIR_ID, COLOR_WHITE, COLOR_BLACK);
+        bkgd(COLOR_PAIR(CUSTOM_PAIR_ID));
+    }
+
+    clear();
     refresh();
 
     ui.chat_win = newwin(LINES-3, COLS-1, 0, 0);
     scrollok(ui.chat_win, TRUE);
+
     box(ui.chat_win, 0, 0);
     mvwprintw(ui.chat_win, 0, 2, " P2P Chat ");
+    
+    wbkgd(ui.chat_win, COLOR_PAIR(CUSTOM_PAIR_ID));
+    wbkgd(ui.input_win, COLOR_PAIR(CUSTOM_PAIR_ID));
+
     wrefresh(ui.chat_win);
 
     ui.input_win = newwin(3, COLS-1, LINES-3, 0);
