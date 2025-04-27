@@ -17,7 +17,7 @@
 //* structs and variables used for socketing and file managements
 
 #define MAX_FILEPATH 523
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "192.168.1.12"
 #define SERVER_PORT 8080
 #define MAX_NAME_LEN 32
 #define MAX_MSG 512
@@ -130,7 +130,7 @@ void start_p2p_listener() {
     }
     
     snprintf(port_msg, sizeof(port_msg), "P2P_PORT:%d", p2p_listener_port);
-    usleep(500); 
+    sleep(1); 
     send_to_current(port_msg);
     
 }
@@ -310,7 +310,6 @@ void init_ui() {
     wrefresh(ui.input_win);
 }
 
-#include <ncurses.h>
 
 void cleanup_ui(void) {
     // 1. Reset terminal attributes

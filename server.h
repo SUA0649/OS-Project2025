@@ -48,11 +48,11 @@ bool server_running = true;
 void handle_p2p_request(int client_sock, const char* target_name);
 void send_p2p_invitation(const char* requester_name, const char* requester_ip, int requester_port, const char* target_name);
 
+void create_server();
 void broadcast_user_list();
 void remove_client(int index);
 void *thread_worker(void *arg);
 void lock_file(char * path);
-void create_server();
 STAILQ_HEAD(queue_head, connection_queue);
 
 // SIGINT handler
@@ -301,30 +301,33 @@ void broadcast_user_list() {
 }
 
 void handle_client(int client_sock, struct sockaddr_in client_addr) { 
+    // Buffer to store the client's IP address
     char temp_client_ip[INET_ADDRSTRLEN] = {0};
     char buffer[MAX_MSG_LEN] = {0};
 
+    // Convert the client's IP address to a readable format
     inet_ntop(AF_INET, &client_addr.sin_addr, temp_client_ip, INET_ADDRSTRLEN);
     int client_port = ntohs(client_addr.sin_port);
 
-    // Get username and local IP
+    // Receive the username and local IP from the client
     int bytes = recv(client_sock, buffer, MAX_MSG_LEN - 1, 0);
     if (bytes <= 0) {
-        close(client_sock);
-        return;
-    }
-    
-    printf("A new client has joined:\n%s\n",buffer);
-    // Parse username and local IP
-    char *username = strtok(buffer, ":");
-    char *local_ip = strtok(NULL, ":");
-    
-    if (!username || !local_ip) {
-        close(client_sock);
+        close(client_sock); // Close the socket if no data is received
         return;
     }
 
-    // Check if username exists
+    printf("A new client has joined:\n%s\n", buffer);
+
+    // Parse the received data to extract the username and local IP
+    char *username = strtok(buffer, ":");
+    char *local_ip = strtok(NULL, ":");
+
+    if (!username || !local_ip) {
+        close(client_sock); // Close the socket if the data is invalid
+        return;
+    }
+
+    // Check if the username already exists
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < client_count; i++) {
         if (strcmp(clients[i].name, username) == 0) {
@@ -336,13 +339,13 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
     }
     pthread_mutex_unlock(&clients_mutex);
 
-    // Add client with their local IP
+    // Add the client to the list of connected clients
     add_client(username, local_ip, client_port, client_sock);
-    
-    // Welcome message
+
+    // Send a welcome message to all other clients
     char welcome_msg[MAX_WELCOME_MSG];
     snprintf(welcome_msg, sizeof(welcome_msg), "SERVER: %s has joined the chat", buffer);
-    
+
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < client_count; i++) {
         if (clients[i].socket != client_sock) {
@@ -351,29 +354,29 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
     }
     pthread_mutex_unlock(&clients_mutex);
 
-    // Chat loop
+    // Main chat loop to handle client messages
     while (1) {
-        memset(buffer, 0, sizeof(buffer));
+        memset(buffer, 0, sizeof(buffer)); // Clear the buffer
         bytes = recv(client_sock, buffer, MAX_MSG_LEN - 1, 0);
-        //printf("%s\n",buffer);
-        if (bytes <= 0) break;
+        if (bytes <= 0) break; // Exit the loop if no data is received
 
-        else if (strcmp(buffer, "/quit") == 0){
+        // Handle the /quit command
+        if (strcmp(buffer, "/quit") == 0) {
             break;
         }
+        // Handle the /connect command for P2P requests
         else if (strncmp(buffer, "/connect ", 9) == 0) {
-            // Handle P2P connection request
             char* target_name = buffer + 9;
             handle_p2p_request(client_sock, target_name);
             continue;
         }
+        // Handle P2P port updates from the client
         else if (strncmp(buffer, "P2P_PORT:", 9) == 0) {
-            // Client is telling us their P2P listening port
             int p2p_port = atoi(buffer + 9);
             pthread_mutex_lock(&clients_mutex);
             for (int i = 0; i < client_count; i++) {
                 if (clients[i].socket == client_sock) {
-                    printf("Client port: %d, P2P_port: %d\n\n", clients[i].port,p2p_port);
+                    printf("Client port: %d, P2P_port: %d\n\n", clients[i].port, p2p_port);
                     clients[i].p2p_port = p2p_port;
                     break;
                 }
@@ -381,13 +384,14 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
             pthread_mutex_unlock(&clients_mutex);
             continue;
         }
-        else if(strncmp(buffer,"/",1)==0){
+        // Ignore unrecognized commands
+        else if (strncmp(buffer, "/", 1) == 0) {
             continue;
         }
 
-        // Broadcast message with correct sender info
+        // Broadcast the message to all clients
         pthread_mutex_lock(&clients_mutex);
-        
+
         int sender_index = -1;
         for (int i = 0; i < client_count; i++) {
             if (clients[i].socket == client_sock) {
@@ -395,15 +399,16 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
                 break;
             }
         }
-        
+
         if (sender_index != -1) {
             char formatted_msg[MAX_MSG_LEN + MAX_NAME_LEN + 3];
             char sender_msg[MAX_MSG_LEN + 10];
-            
+
+            // Format the message for the sender and other clients
             snprintf(formatted_msg, sizeof(formatted_msg), "%s: %s", 
             clients[sender_index].name, buffer);
             snprintf(sender_msg, sizeof(sender_msg), "You: %s", buffer);
-            
+
             for (int i = 0; i < client_count; i++) {
                 if (i == sender_index) {
                     send(clients[i].socket, sender_msg, strlen(sender_msg), 0);
@@ -412,10 +417,11 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
                 }
             }
         }
-        
+
         pthread_mutex_unlock(&clients_mutex);
     }
-    
+
+    // Handle client disconnection
     int found_index = -1;
     for (int i = 0; i < client_count; i++) {
         if (clients[i].socket == client_sock) {
@@ -423,23 +429,24 @@ void handle_client(int client_sock, struct sockaddr_in client_addr) {
             break;
         }
     }
-    
+
     pthread_mutex_lock(&clients_mutex);
     if (found_index != -1) {
         char leave_msg[MAX_WELCOME_MSG];
         snprintf(leave_msg, sizeof(leave_msg), "SERVER: %s has left the chat", 
         clients[found_index].name);
-        // Send leave notification
+        // Notify other clients about the disconnection
         for (int i = 0; i < client_count; i++) {
             if (i != found_index) {
                 send(clients[i].socket, leave_msg, strlen(leave_msg), 0);
             }
-        }        pthread_mutex_unlock(&clients_mutex);
+        }
+        pthread_mutex_unlock(&clients_mutex);
 
         remove_client(found_index); 
     }
     send(clients[found_index].socket, "SERVER: You have been disconnected", 34, 0);
-    close(client_sock);
+    close(client_sock); // Close the client socket
 }
 
 //* Used for sending p2p invitation
@@ -462,27 +469,36 @@ void send_p2p_invitation(const char* requester_name, const char* requester_ip,
 }
 
 
-//* Used for keeping the threads inactive when there is no work available through queue mechanism.
+//* Thread worker function to handle client connections from the queue.
 void *thread_worker(void *arg) {
     while(server_running) {
         connection_queue_t *item = NULL;
-        
+
+        // Lock the queue mutex to safely access the connection queue.
         pthread_mutex_lock(&queue_mutex);
+
+        // Wait for a connection to be added to the queue or for the server to stop running.
         while (STAILQ_EMPTY(&connection_queue) && server_running) {
             pthread_cond_wait(&queue_cond, &queue_mutex);
         }
-        
+
+        // If the server is no longer running, unlock the mutex and exit the loop.
         if (!server_running) {
             pthread_mutex_unlock(&queue_mutex);
             break;
         }
-        
+
+        // Retrieve the first item from the connection queue.
         item = STAILQ_FIRST(&connection_queue);
         if (item != NULL) {
+            // Remove the item from the queue.
             STAILQ_REMOVE_HEAD(&connection_queue, entries);
         }
+
+        // Unlock the queue mutex after accessing the queue.
         pthread_mutex_unlock(&queue_mutex);
-        
+
+        // If a connection was retrieved, handle the client and free the memory.
         if (item != NULL) {
             handle_client(item->client_sock, item->client_addr);
             free(item);
@@ -490,5 +506,4 @@ void *thread_worker(void *arg) {
     }
     return NULL;
 }
-// Queue for incoming connectionstypedef struct connection_queue {
 
