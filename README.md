@@ -1,7 +1,13 @@
-# Chat Application
+# NERV TERMINAL
 
-This is a modular chat application that supports both server-based communication and peer-to-peer (P2P) connections. The application is built using `C` and uses `ncurses` for the user interface, along with socket programming for networking.
-
+- This is a modular chat application that supports both server-based communication and peer-to-peer (P2P) connections. The application is built using `C` and uses `ncurses` for the user interface, along with socket programming for networking.
+---
+## Collaborators:
+### FAST NU KHI Students
+- Shaheer Uddin Ahmed (23K-0649)
+- Muhammad Faizan Jawaid (23K-0688)
+- Shayan Mustafa (23K-0924)
+- Shahnoor Ahmed (23I-0543)
 ---
 
 ## Features
@@ -10,9 +16,9 @@ This is a modular chat application that supports both server-based communication
 - **Peer-to-Peer Communication**: Establish direct connections with peers for private chats.
 - **Chat Logging**: Save and view chat history with specific users.
 - **Command Support**:
-  - `/quit`: Exit the application.
-  - `/p2p <peer_ip>:<peer_port>`: Connect to a peer for direct communication.
-  - `/log <target_user>`: View chat history with a specific user.
+  - ``` ` ```  or `/quit`: Exit the application.
+   - `/connect <target user>`: Connect to a peer for direct communication.
+   - `Ctrl + C`: End server from terminal
 
 ---
 
@@ -58,6 +64,7 @@ The project is organized into multiple modules for better readability and mainta
 - `ncurses` library installed on your system
 
 ### Build Instructions
+(Make sure to change you IP to your local IP in client.h)
 1. Navigate to the project directory:
    ```bash
    cd "d:\OS Project 2025\OS-Project2025"
@@ -66,13 +73,13 @@ The project is organized into multiple modules for better readability and mainta
    ```bash
    make
    ```
+3. Run the server application (important):
+   ```bash
+   ./server.exe
+   ```
 3. Run the client application:
    ```bash
    ./client.exe
-   ```
-4. Run the server application (if needed):
-   ```bash
-   ./server.exe
    ```
 
 ---
@@ -84,9 +91,9 @@ The project is organized into multiple modules for better readability and mainta
    - Enter your username when prompted.
 
 2. **Commands**:
-   - `/quit`: Exit the application.
-   - `/p2p <peer_ip>:<peer_port>`: Connect to a peer for direct communication.
-   - `/log <target_user>`: View chat history with a specific user.
+   - \` or `/quit`: Exit the application.
+   - `/connect <target user>`: Connect to a peer for direct communication.
+   - `Ctrl + C`: End server from terminal
 
 3. **Chat**:
    - Type messages and press `Enter` to send them to the server or the current P2P connection.
@@ -109,8 +116,7 @@ OS-Project2025/
 ├── README.md              # Project documentation
 ├── README_end.md          # Extended project documentation
 └── Logs/                  # Chat logs
-    ├── Sh.json
-    └── Shaheer.json
+    ├── *.json
 ```
 
 ---
@@ -143,7 +149,7 @@ OS-Project2025/
      - Title bar
 
 6. **Command Handling**:
-   - The application should handle commands like `/quit`, `/p2p`, and `/log` gracefully.
+   - The application should handle commands like `/quit`, and `/connect` gracefully.
    - Invalid commands should display an error message.
 
 ---
@@ -207,10 +213,5 @@ Below is a diagram representing the flow of the application and its results:
 
 - Add encryption for P2P communication.
 - Implement file sharing between peers.
-- Improve error handling for invalid commands and connection failures.
-
+- Improved error handling for invalid commands and connection failures.
 ---
-
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
